@@ -1,0 +1,16 @@
+[Unit]
+Description=Micro-BNG
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/micro-bngd -d -p /var/run/micro-bngd.pid -c /etc/micro-bng.conf
+StandardOutput=null
+ExecReload=/bin/kill -SIGUSR1 $MAINPID
+PIDFile=/var/run/micro-bngd.pid
+Type=forking
+#Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+Alias=micro-bng.service
+

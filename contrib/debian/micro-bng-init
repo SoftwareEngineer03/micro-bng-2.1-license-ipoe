@@ -1,0 +1,59 @@
+#!/bin/sh
+# /etc/init.d/micro-bngd: set up the micro-bng server
+### BEGIN INIT INFO
+# Provides:          micro-bng
+# Required-Start:    $remote_fs $syslog $network $time
+# Required-Stop:     $remote_fs $syslog $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+### END INIT INFO
+
+set -e
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+. /lib/lsb/init-functions
+
+if test -f /etc/default/micro-bng; then
+    . /etc/default/micro-bng
+fi
+
+if [ -z "$MICRO_BNGD_OPTS" ]; then
+  MICRO_BNGD_OPTS="-c /etc/micro-bng.conf"
+fi
+
+case "$1" in
+  start)
+	log_daemon_msg "Starting IPoE/PPtP/L2TP/SSTP/PPPoE server" "micro-bngd"
+	if start-stop-daemon --start --quiet --oknodo --exec /usr/sbin/micro-bngd -- -d -p /var/run/micro-bngd.pid $MICRO_BNGD_OPTS; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+  ;;
+  restart)
+	log_daemon_msg "Restarting IPoE/PPtP/L2TP/SSTP/PPPoE server" "micro-bngd"
+	start-stop-daemon --stop --quiet --oknodo --retry 180 --pidfile /var/run/micro-bngd.pid
+	if start-stop-daemon --start --quiet --oknodo --exec /usr/sbin/micro-bngd -- -d -p /var/run/micro-bngd.pid $MICRO_BNGD_OPTS; then
+	    log_end_msg 0
+	else
+	    log_end_msg 1
+	fi
+  ;;
+
+  stop)
+	log_daemon_msg "Stopping IPoE/PPtP/L2TP/SSTP/PPPoE server" "micro-bngd"
+	start-stop-daemon --stop --quiet --oknodo --retry 180 --pidfile /var/run/micro-bngd.pid
+	log_end_msg 0
+  ;;
+
+  status)
+	status_of_proc /usr/sbin/micro-bngd "micro-bngd"
+  ;;
+  *)
+    log_success_msg "Usage: /etc/init.d/micro-bng {start|stop|status|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

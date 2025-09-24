@@ -1,0 +1,31 @@
+# -*- text -*-
+#
+# dictionary.microbng
+#
+#       MicroBNG-specific attributes for BNG operations
+#
+VENDOR          MicroBNG                        61442
+
+BEGIN-VENDOR    MicroBNG
+
+# Bandwidth management
+ATTRIBUTE       MicroBNG-Bandwidth-Max-Up              1       integer
+ATTRIBUTE       MicroBNG-Bandwidth-Max-Down            2       integer
+ATTRIBUTE       MicroBNG-Bandwidth-Min-Up              3       integer
+ATTRIBUTE       MicroBNG-Bandwidth-Min-Down            4       integer
+
+# Quality of Service
+ATTRIBUTE       MicroBNG-QoS-Profile                   5       string
+
+# Access and rate limiting
+ATTRIBUTE       MicroBNG-Access-Policy                 6       string
+ATTRIBUTE       MicroBNG-Rate-Limit-Session            7       string
+
+# Session management
+ATTRIBUTE       MicroBNG-Session-Terminate-Time        8       string
+ATTRIBUTE       MicroBNG-Session-Terminate-Action      9       integer
+
+ATTRIBUTE       MicroBNG-DNS-Primary                   10      ipaddr
+ATTRIBUTE       MicroBNG-DNS-Secondary                 11      ipaddr
+
+END-VENDOR      MicroBNG

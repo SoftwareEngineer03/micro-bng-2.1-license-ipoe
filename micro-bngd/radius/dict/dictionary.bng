@@ -1,0 +1,7 @@
+VENDOR			Micro-BNG				55999
+
+BEGIN-VENDOR	Micro-BNG
+
+ATTRIBUTE	Bng-VRF-Name			1		string
+
+END-VENDOR		Micro-BNG

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+chmod +x /etc/init.d/micro-bng
+
+mkdir /var/log/micro-bng > /dev/null 2>&1
+mkdir /var/lib/micro-bng > /dev/null 2>&1
+
+depmod
+
+exit 0

@@ -1,0 +1,20 @@
+#!/sbin/runscript
+
+depend() {
+	need net
+}
+
+start() {
+	ebegin "Starting micro-bngd"
+	start-stop-daemon --start --quiet --exec /usr/sbin/micro-bngd -- -p /var/run/micro-bngd.pid ${MICRO_BNGD_OPTS}
+	eend $?
+}
+
+stop() {
+	ebegin "Stopping micro-bngd"
+	start-stop-daemon --stop --quiet --pidfile /var/run/micro-bngd.pid
+	result=$?
+	start-stop-daemon --stop --quiet --oknodo --exec /usr/sbin/micro-bngd
+	result=$(( $result + $? ))
+	eend $result
+}

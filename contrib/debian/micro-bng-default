@@ -1,0 +1,5 @@
+# Config file for /etc/init.d/micro-bngd
+
+# Any extra options you want to pass to aceel-pptpd
+# on start-up should be put here.
+MICRO_BNGD_OPTS="-c /etc/micro-bng.conf"

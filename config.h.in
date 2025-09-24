@@ -1,0 +1,5 @@
+//#cmakedefine MICRO_BNG_VERSION "${MICRO_BNG_VERSION}"
+//#cmakedefine RADIUS
+#cmakedefine HAVE_IPSET
+#cmakedefine HAVE_SETNS
+#cmakedefine HAVE_VRF

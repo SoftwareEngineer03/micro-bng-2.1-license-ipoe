@@ -1,0 +1,5 @@
+# Config file for /etc/init.d/bng-pptpd
+
+# Any extra options you want to pass to pptpd
+# on start-up should be put here.
+MICRO_BNGD_OPTS="-d -c /etc/micro-bng.conf"
