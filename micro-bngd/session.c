@@ -14,6 +14,8 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <linux/if.h>
+#include <stdbool.h>
+#include <ctype.h>
 
 #include "triton.h"
 #include "log.h"
@@ -28,9 +30,25 @@
 #include "memdebug.h"
 
 #include "vppapi.h"
+#include "license.h"
+#include "cli.h"
 
 #define SID_SOURCE_SEQ 0
 #define SID_SOURCE_URANDOM 1
+
+#define MAX_LINE_LENGTH 256
+#define MAX_VALUE_LENGTH 160
+
+#define LICENSE_FILE_NAME "/etc/micro-bng/micro-bng.lic"
+#define TEMP_FILE "/etc/micro-bng/temp_license.lic"
+
+typedef struct {
+    char license_key[MAX_VALUE_LENGTH];
+    char contact_name[MAX_VALUE_LENGTH];
+    char contact_phone[MAX_VALUE_LENGTH];
+    char contact_email[MAX_VALUE_LENGTH];
+    char contact_organization[MAX_VALUE_LENGTH];
+} LicenseData;
 
 static int conf_sid_ucase;
 static int conf_single_session = -1;
@@ -49,12 +67,16 @@ int __export sock_fd;
 int __export sock6_fd;
 int __export urandom_fd;
 int __export ap_shutdown;
+int __export test_parameter;
 
 #if __WORDSIZE == 32
 static spinlock_t seq_lock;
 #endif
 static long long unsigned seq;
 static struct timespec seq_ts;
+
+static char *product_uuid, *product_serial, *product_name;
+static char microbng_uuid[256];
 
 struct ap_session_stat __export ap_session_stat;
 
@@ -520,6 +542,295 @@ static void save_seq(void)
 	}
 }
 
+static void update_license_help(char * const *f, int f_cnt, void *cli)
+{
+	cli_send(cli, "update license <license-key,[contact-name,contact-phone,contact-email,contact-organization]> - updates license information\r\n"
+                "\tex:\r\n"
+                "\t\tupdate license K7FQG-BALTZ-ISHNL-YS47E-STATL-A\r\n"
+                "\t\tupdate license K7FQG-BALTZ-ISHNL-YS47E-STATL-A,ankur,+91-99994-49349,ankurdelhi1987@gmail.com,netgroot\r\n");
+}
+
+static void show_license_help(char * const *f, int f_cnt, void *cli)
+{
+	cli_send(cli, "show license - shows license information\r\n");
+}
+
+int parse_parameters(const char* input, char** fields, size_t field_count, size_t max_len) {
+    const char* start = input;
+    int current_field = 0;
+    
+    while (*input && current_field < field_count) {
+        if (*input == ',') {
+            size_t len = input - start;
+            if (len >= max_len) return false;
+            
+            strncpy(fields[current_field], start, len);
+            fields[current_field][len] = '\0';
+            current_field++;
+            start = input + 1;
+        }
+        input++;
+    }
+    
+    // Handle last field
+    if (current_field < field_count) {
+        size_t len = input - start;
+        if (len >= max_len) return false;
+        strncpy(fields[current_field], start, len);
+        fields[current_field][len] = '\0';
+        current_field++;
+    }
+    
+    return current_field;
+}
+
+void trim_whitespace(char* str) {
+    char* end;
+    
+    // Trim leading space
+    while(isspace((unsigned char)*str)) str++;
+    
+    if(*str == 0) return;
+    
+    // Trim trailing space
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+    
+    // Write new null terminator
+    *(end+1) = 0;
+}
+
+bool parse_license_file(const char* filename, LicenseData* data) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        perror("Error opening file");
+        return false;
+    }
+
+    char line[MAX_LINE_LENGTH];
+    while (fgets(line, sizeof(line), file)) {
+        // Remove newline character
+        line[strcspn(line, "\n")] = '\0';
+
+        char* delimiter = strchr(line, '=');
+        if (!delimiter) continue;
+
+        *delimiter = '\0';
+        char* key = line;
+        char* value = delimiter + 1;
+
+        // Trim whitespace from key and value
+        trim_whitespace(key);
+        trim_whitespace(value);
+
+        // Assign values to struct fields
+        if (strcmp(key, "license_key") == 0) {
+            strncpy(data->license_key, value, MAX_VALUE_LENGTH);
+        } else if (strcmp(key, "contact_name") == 0) {
+            strncpy(data->contact_name, value, MAX_VALUE_LENGTH);
+        } else if (strcmp(key, "contact_phone") == 0) {
+            strncpy(data->contact_phone, value, MAX_VALUE_LENGTH);
+        } else if (strcmp(key, "contact_email") == 0) {
+            strncpy(data->contact_email, value, MAX_VALUE_LENGTH);
+        } else if (strcmp(key, "contact_organization") == 0) {
+            strncpy(data->contact_organization, value, MAX_VALUE_LENGTH);
+        }
+    }
+
+    fclose(file);
+    return true;
+}
+
+bool is_comment_line(const char* line) {
+    while(isspace((unsigned char)*line)) line++;
+    return *line == '#' || *line == ';';
+}
+
+bool is_blank_line(const char* line) {
+    while(*line) {
+        if(!isspace((unsigned char)*line))
+            return false;
+        line++;
+    }
+    return true;
+}
+
+static int update_license_exec(const char *cmd, char * const *f, int f_cnt, void *cli)
+{
+	if (f_cnt < 3)
+		return CLI_CMD_SYNTAX;
+
+    char license[MAX_VALUE_LENGTH] = "", name[MAX_VALUE_LENGTH] = "", phone[MAX_VALUE_LENGTH] = "", email[MAX_VALUE_LENGTH] = "", org[MAX_VALUE_LENGTH] = "";
+    char* fields[] = {license, name, phone, email, org};
+
+    parse_parameters(f[2], fields, 5, MAX_VALUE_LENGTH);
+    printf("License: %s\n", license);
+    printf("Name: %s\n", name);
+    printf("Phone: %s\n", phone);
+    printf("Email: %s\n", email);
+    printf("Organization: %s\n", org);
+
+    LicenseData licensedata;
+    memset(&licensedata, 0, sizeof(licensedata));
+    if (!parse_license_file(LICENSE_FILE_NAME, &licensedata)) {
+        fprintf(stderr, "Failed to parse license file\n");
+        return 1;
+    }
+
+    if(strlen(license)) strncpy(licensedata.license_key, license, MAX_VALUE_LENGTH);
+    if(strlen(name)) strncpy(licensedata.contact_name, name, MAX_VALUE_LENGTH);
+    if(strlen(phone)) strncpy(licensedata.contact_phone, phone, MAX_VALUE_LENGTH);
+    if(strlen(email)) strncpy(licensedata.contact_email, email, MAX_VALUE_LENGTH);
+    if(strlen(org)) strncpy(licensedata.contact_organization, org, MAX_VALUE_LENGTH);
+
+    FILE* original = fopen(LICENSE_FILE_NAME, "r");
+    if (!original) {
+        perror("Error opening original file");
+        return false;
+    }
+
+    FILE* temp = fopen(TEMP_FILE, "w");
+    if (!temp) {
+        perror("Error creating temp file");
+        fclose(original);
+        return false;
+    }
+
+    char line[MAX_LINE_LENGTH];
+    bool fields_updated[5] = {false}; // Track which fields we've written
+    
+    while (fgets(line, sizeof(line), original)) {
+        // Copy comments and blank lines as-is
+        if(is_comment_line(line) || is_blank_line(line)) {
+            fputs(line, temp);
+            continue;
+        }
+
+        char* delimiter = strchr(line, '=');
+        if (!delimiter) {
+            fputs(line, temp); // Copy malformed lines as-is
+            continue;
+        }
+
+        *delimiter = '\0';
+        char* key = line;
+        char* value = delimiter + 1;
+
+        trim_whitespace(key);
+        
+        // Handle fields we want to update
+        if (strcmp(key, "license_key") == 0) {
+            fprintf(temp, "license_key=%s\n", licensedata.license_key);
+            fields_updated[0] = true;
+        } else if (strcmp(key, "contact_name") == 0) {
+            fprintf(temp, "contact_name=%s\n", licensedata.contact_name);
+            fields_updated[1] = true;
+        } else if (strcmp(key, "contact_phone") == 0) {
+            fprintf(temp, "contact_phone=%s\n", licensedata.contact_phone);
+            fields_updated[2] = true;
+        } else if (strcmp(key, "contact_email") == 0) {
+            fprintf(temp, "contact_email=%s\n", licensedata.contact_email);
+            fields_updated[3] = true;
+        } else if (strcmp(key, "contact_organization") == 0) {
+            fprintf(temp, "contact_organization=%s\n", licensedata.contact_organization);
+            fields_updated[4] = true;
+        } else {
+            // Copy other key-value pairs unchanged
+            *delimiter = '='; // Restore the delimiter
+            fputs(line, temp);
+        }
+    }
+
+    // Add any missing fields at the end
+    if (!fields_updated[0]) fprintf(temp, "license_key=%s\n", licensedata.license_key);
+    if (!fields_updated[1]) fprintf(temp, "contact_name=%s\n", licensedata.contact_name);
+    if (!fields_updated[2]) fprintf(temp, "contact_phone=%s\n", licensedata.contact_phone);
+    if (!fields_updated[3]) fprintf(temp, "contact_email=%s\n", licensedata.contact_email);
+    if (!fields_updated[4]) fprintf(temp, "contact_organization=%s\n", licensedata.contact_organization);
+
+    fclose(original);
+    fclose(temp);
+
+    // Replace original file with temp file
+    remove(LICENSE_FILE_NAME);
+    rename(TEMP_FILE, LICENSE_FILE_NAME);
+
+    CompactData lic_data;
+    memset(&lic_data, 0, sizeof(CompactData));
+    int ret = get_data_from_authfile(microbng_uuid, &lic_data);
+    if(ret) {
+        log_warn("license key is invalid.\n");
+    } else {
+        if(get_remaining(lic_data.expiry) <= 0) {
+            log_warn("license is expired.\n");
+            conf_max_sessions = 0;
+            test_parameter  = 0;
+        } else {
+            conf_max_sessions = lic_data.session_count;
+            test_parameter  = lic_data.session_count;
+        }
+    }
+
+    return CLI_CMD_OK;
+}
+
+static int show_license_exec(const char *cmd, char * const *f, int f_cnt, void *cli)
+{
+	if (f_cnt < 2)
+		return CLI_CMD_SYNTAX;
+
+    CompactData lic_data;
+
+    memset(&lic_data, 0, sizeof(CompactData));
+
+    int ret = get_data_from_authfile(microbng_uuid, &lic_data);
+    if(ret) {
+        log_warn("license key is invalid.\n");
+        cli_sendv(cli, "license key is invalid.\r\n\r\n");
+    } else {
+        if(get_remaining(lic_data.expiry) <= 0) {
+            log_warn("license is expired.\n");
+            cli_sendv(cli, "license is expired.\r\n\r\n");
+        }
+    }
+    
+    time_t future_timestamp = get_future_timestamp(lic_data.expiry);
+    struct tm *timeinfo = localtime(&future_timestamp);
+    if (timeinfo == NULL) {
+        return CLI_CMD_INVAL;
+    }
+    char date_string[50];
+    strftime(date_string, sizeof(date_string), "%Y-%m-%d", timeinfo);
+
+    cli_sendv(cli, "microbng_uuid=%s\r\n", microbng_uuid);
+    cli_sendv(cli, "max_sessions=%u\r\n", lic_data.session_count);
+    cli_sendv(cli, "limit_bandwidth=%u Gbps\r\n", lic_data.bandwidth);
+    cli_sendv(cli, "expiration_date=%s\r\n", date_string);
+    cli_sendv(cli, "product_uuid=%s\r\n", product_uuid);
+    cli_sendv(cli, "product_serial=%s\r\n", product_serial);
+    cli_sendv(cli, "product_name=%s\r\n", product_name);
+
+    FILE *file;
+    char content[9000];
+
+    // Open the file in read mode
+    file = fopen(LICENSE_FILE_NAME, "r");
+    if (file == NULL) {
+        perror("Error opening file");
+        return CLI_CMD_INVAL;
+    }
+
+    size_t bytes_read = fread(content, 1, sizeof(content), file);
+    if(bytes_read > 0){
+        content[bytes_read] = '\0';  // Null-terminate the string
+        cli_sendv(cli, "%s\r\n", content);
+    }
+
+    fclose(file);
+
+    return CLI_CMD_OK;
+}
+
 static void load_config(void)
 {
 	const char *opt;
@@ -562,11 +873,6 @@ static void load_config(void)
 	if (!conf_seq_file)
 		conf_seq_file = "/var/lib/micro-bng/seq";
 
-	opt = conf_get_opt("common", "max-sessions");
-	if (opt)
-		conf_max_sessions = atoi(opt);
-	else
-		conf_max_sessions = 0;
 
 	opt = conf_get_opt("common", "max-starting");
 	if (opt)
@@ -579,6 +885,31 @@ static void load_config(void)
 		conf_session_timeout = atoi(opt);
 	else
 		conf_session_timeout = 0;
+}
+
+static void * license_thread(void *data)
+{
+    int ret;
+    while(1) {
+        CompactData lic_data;
+        memset(&lic_data, 0, sizeof(CompactData));
+        ret = get_data_from_authfile(microbng_uuid, &lic_data);
+        if(ret) {
+            log_warn("license key is invalid.\n");
+        } else {
+            if(get_remaining(lic_data.expiry) <= 0) {
+                log_warn("license is expired.\n");
+                conf_max_sessions = 0;
+                test_parameter  = 0;
+            } else {
+                conf_max_sessions = lic_data.session_count;
+                test_parameter  = lic_data.session_count;
+            }
+        }
+
+        sleep(3600*24);
+    }
+    return NULL;
 }
 
 static void init(void)
@@ -611,7 +942,15 @@ static void init(void)
 
 	fcntl(urandom_fd, F_SETFD, fcntl(urandom_fd, F_GETFD) | FD_CLOEXEC);
 
+    get_unique_id(microbng_uuid);
+    product_uuid    = get_dmi_string("sudo dmidecode --string system-uuid");
+    product_serial  = get_dmi_string("sudo dmidecode --string system-serial-number");
+    product_name    = get_dmi_string("sudo dmidecode -s system-product-name");
+
 	load_config();
+
+    pthread_t lic_thr;
+	pthread_create(&lic_thr, NULL, license_thread, NULL);
 
 	f = fopen(conf_seq_file, "r");
 	if (f) {
@@ -622,6 +961,9 @@ static void init(void)
 		read(urandom_fd, &seq, sizeof(seq));
 
 	triton_event_register_handler(EV_CONFIG_RELOAD, (triton_event_func)load_config);
+
+    cli_register_simple_cmd2(show_license_exec, show_license_help, 2, "show", "license");
+    cli_register_simple_cmd2(update_license_exec, update_license_help, 2, "update", "license");
 
 	atexit(save_seq);
 }

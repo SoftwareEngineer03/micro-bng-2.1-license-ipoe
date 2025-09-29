@@ -123,6 +123,8 @@ ADD_EXECUTABLE(micro-bngd
 	rbtree.c
 	
 	myhashtable.c
+	base32.c
+	license.c
 
 	vppapi.c
 

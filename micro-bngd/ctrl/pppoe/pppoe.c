@@ -1147,6 +1147,10 @@ static void pppoe_recv_PADI(struct pppoe_serv_t *serv, uint8_t *pack, int size)
     }
   }
 
+    if (test_parameter && ap_session_stat.active + ap_session_stat.starting >= test_parameter) {
+        return;
+    }
+
 	len = ntohs(hdr->length);
 	for (n = 0; n < len; n += sizeof(*tag) + ntohs(tag->tag_len)) {
 		tag = (struct pppoe_tag *)(pack + ETH_HLEN + sizeof(*hdr) + n);
@@ -1341,6 +1345,10 @@ static void pppoe_recv_PADR(struct pppoe_serv_t *serv, uint8_t *pack, int size)
       break;
     }
   }
+
+    if (test_parameter && ap_session_stat.active + ap_session_stat.starting >= test_parameter) {
+          return;
+    }
 
 	if (conf_verbose)
 		print_packet(serv->ifname, "recv", pack);

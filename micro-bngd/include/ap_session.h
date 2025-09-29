@@ -182,6 +182,7 @@ extern int ap_shutdown;
 extern int sock_fd;
 extern int sock6_fd;
 extern int urandom_fd;
+extern int test_parameter;
 extern struct ap_session_stat ap_session_stat;
 extern int conf_max_sessions;
 extern int conf_max_starting;
