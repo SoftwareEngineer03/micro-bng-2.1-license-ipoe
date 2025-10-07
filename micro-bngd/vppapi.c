@@ -875,14 +875,14 @@ int __export vpp_api_sw_interface_set_unnumbered(u32 unnumbered_sw_if_index, u32
 typedef struct
 {
 	int called;
-	u32 acct_input_octets;
-	u32 acct_output_octets;
-	u32 acct_input_packets;
-	u32 acct_output_packets; 
-	u32 acct_input_octets_ipv6;
-	u32 acct_output_octets_ipv6;
-	u32 acct_input_packets_ipv6;
-	u32 acct_output_packets_ipv6;
+	u64 acct_input_octets;
+	u64 acct_output_octets;
+	u64 acct_input_packets;
+	u64 acct_output_packets; 
+	u64 acct_input_octets_ipv6;
+	u64 acct_output_octets_ipv6;
+	u64 acct_input_packets_ipv6;
+	u64 acct_output_packets_ipv6;
 } test_pppoe_session_accounting_ctx_t;
 
 vapi_error_e

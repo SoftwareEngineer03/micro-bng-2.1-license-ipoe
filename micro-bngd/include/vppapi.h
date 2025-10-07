@@ -7,14 +7,14 @@ extern vapi_ctx_t ctx_acct;
 
 typedef struct
 {
-	u32 acct_input_octets;
-	u32 acct_output_octets;
-	u32 acct_input_packets;
-	u32 acct_output_packets;
-	u32 acct_input_octets_ipv6;
-	u32 acct_output_octets_ipv6;
-	u32 acct_input_packets_ipv6;
-	u32 acct_output_packets_ipv6;
+	u64 acct_input_octets;
+	u64 acct_output_octets;
+	u64 acct_input_packets;
+	u64 acct_output_packets;
+	u64 acct_input_octets_ipv6;
+	u64 acct_output_octets_ipv6;
+	u64 acct_input_packets_ipv6;
+	u64 acct_output_packets_ipv6;
 } pppoe_session_accounting_t;
 
 void vpp_api_connection();

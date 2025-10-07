@@ -797,7 +797,7 @@ static void print_traffic(struct ap_session *ses, char *buf)
   pppoe_session_accounting_t accounting;
   vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
   
-  snprintf(buf, CELL_SIZE, "{tx:%u, rx:%u}", 
+  snprintf(buf, CELL_SIZE, "{tx:%llu, rx:%llu}", 
     accounting.acct_output_octets + accounting.acct_output_octets_ipv6,
     accounting.acct_input_octets + accounting.acct_input_octets_ipv6);
 }
@@ -976,10 +976,10 @@ void show_one_user(struct ap_session *ses, void *cli)
     cli_sendv(cli, " rx-bytes=%s,", buf);
     format_bytes(buf, accounting.acct_output_octets);
     cli_sendv(cli, " tx-bytes=%s,", buf);
-    cli_sendv(cli, " rx-packets=%u,", accounting.acct_input_packets);
-    cli_sendv(cli, " tx-packets=%u,", accounting.acct_output_packets);
-    cli_sendv(cli, " rx-bytes-raw=%u,", accounting.acct_input_octets);
-    cli_sendv(cli, " tx-bytes-raw=%u\n", accounting.acct_output_octets);
+    cli_sendv(cli, " rx-packets=%llu,", accounting.acct_input_packets);
+    cli_sendv(cli, " tx-packets=%llu,", accounting.acct_output_packets);
+    cli_sendv(cli, " rx-bytes-raw=%llu,", accounting.acct_input_octets);
+    cli_sendv(cli, " tx-bytes-raw=%llu\n", accounting.acct_output_octets);
   }
   
   if(ses->ipv6) {
@@ -992,10 +992,10 @@ void show_one_user(struct ap_session *ses, void *cli)
     cli_sendv(cli, " rx-bytes=%s,", buf);
     format_bytes(buf, accounting.acct_output_octets_ipv6);
     cli_sendv(cli, " tx-bytes=%s,", buf);
-    cli_sendv(cli, " rx-packets=%u,", accounting.acct_input_packets_ipv6);
-    cli_sendv(cli, " tx-packets=%u,", accounting.acct_output_packets_ipv6);
-    cli_sendv(cli, " rx-bytes-raw=%u,", accounting.acct_input_octets_ipv6);
-    cli_sendv(cli, " tx-bytes-raw=%u\n", accounting.acct_output_octets_ipv6);
+    cli_sendv(cli, " rx-packets=%llu,", accounting.acct_input_packets_ipv6);
+    cli_sendv(cli, " tx-packets=%llu,", accounting.acct_output_packets_ipv6);
+    cli_sendv(cli, " rx-bytes-raw=%llu,", accounting.acct_input_octets_ipv6);
+    cli_sendv(cli, " tx-bytes-raw=%llu\n", accounting.acct_output_octets_ipv6);
   } else {
     //cli_sendv(cli, "  IP6=  IP6-DP=\n");
   }
@@ -1005,10 +1005,10 @@ void show_one_user(struct ap_session *ses, void *cli)
   cli_sendv(cli, " rx-bytes=%s,", buf);
   format_bytes(buf, accounting.acct_output_octets + accounting.acct_output_octets_ipv6);
   cli_sendv(cli, " tx-bytes=%s,", buf);
-  cli_sendv(cli, " rx-packets=%u,", accounting.acct_input_packets + accounting.acct_input_packets_ipv6);
-  cli_sendv(cli, " tx-packets=%u,", accounting.acct_output_packets + accounting.acct_output_packets_ipv6);
-  cli_sendv(cli, " rx-bytes-raw=%u,", accounting.acct_input_octets + accounting.acct_input_octets_ipv6);
-  cli_sendv(cli, " tx-bytes-raw=%u\n", accounting.acct_output_octets + accounting.acct_output_octets_ipv6);
+  cli_sendv(cli, " rx-packets=%llu,", accounting.acct_input_packets + accounting.acct_input_packets_ipv6);
+  cli_sendv(cli, " tx-packets=%llu,", accounting.acct_output_packets + accounting.acct_output_packets_ipv6);
+  cli_sendv(cli, " rx-bytes-raw=%llu,", accounting.acct_input_octets + accounting.acct_input_octets_ipv6);
+  cli_sendv(cli, " tx-bytes-raw=%llu\n", accounting.acct_output_octets + accounting.acct_output_octets_ipv6);
 
 }
 
