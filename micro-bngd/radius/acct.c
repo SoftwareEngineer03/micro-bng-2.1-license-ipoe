@@ -57,8 +57,8 @@ static int req_set_stat(struct rad_req_t *req, struct ap_session *ses)
 		rad_packet_change_int(req->pack, NULL, "Acct-Output-Octets", (int) (stats.tx_bytes & UINT32_MAX));
 		rad_packet_change_int(req->pack, NULL, "Acct-Input-Packets", (int) (stats.rx_packets & UINT32_MAX));
 		rad_packet_change_int(req->pack, NULL, "Acct-Output-Packets", (int) (stats.tx_packets & UINT32_MAX));
-		//rad_packet_change_int(req->pack, NULL, "Acct-Input-Gigawords", (int) (stats.rx_bytes >> (sizeof(uint32_t) * 8)));
-		//rad_packet_change_int(req->pack, NULL, "Acct-Output-Gigawords", (int) (stats.tx_bytes >> (sizeof(uint32_t) * 8)))
+		rad_packet_change_int(req->pack, NULL, "Acct-Input-Gigawords", (int) (stats.rx_bytes >> (sizeof(uint32_t) * 8)));
+		rad_packet_change_int(req->pack, NULL, "Acct-Output-Gigawords", (int) (stats.tx_bytes >> (sizeof(uint32_t) * 8)));
 	} else
 		ret = -1;
 
