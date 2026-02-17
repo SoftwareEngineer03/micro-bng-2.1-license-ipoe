@@ -57,7 +57,7 @@ static int conf_sid_source;
 static int conf_seq_save_timeout = 10;
 static int conf_session_timeout;
 static const char *conf_seq_file;
-int __export conf_max_sessions;
+int __export conf_max_sessions = 0;
 int __export conf_max_starting;
 
 pthread_rwlock_t __export ses_lock = PTHREAD_RWLOCK_INITIALIZER;
@@ -760,6 +760,8 @@ static int update_license_exec(const char *cmd, char * const *f, int f_cnt, void
     int ret = get_data_from_authfile(microbng_uuid, &lic_data);
     if(ret) {
         log_warn("license key is invalid.\n");
+        conf_max_sessions = 0;
+        test_parameter  = 0;
     } else {
         if(get_remaining(lic_data.expiry) <= 0) {
             log_warn("license is expired.\n");
@@ -896,6 +898,8 @@ static void * license_thread(void *data)
         ret = get_data_from_authfile(microbng_uuid, &lic_data);
         if(ret) {
             log_warn("license key is invalid.\n");
+            conf_max_sessions = 0;
+            test_parameter  = 0;
         } else {
             if(get_remaining(lic_data.expiry) <= 0) {
                 log_warn("license is expired.\n");
