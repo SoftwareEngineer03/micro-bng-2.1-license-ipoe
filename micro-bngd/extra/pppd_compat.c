@@ -665,7 +665,7 @@ static void fill_env(char **env, char *mem, struct pppd_compat_pd *pd)
 		++n;
 	}
 
-	if (ses->ipv6_dp) {
+	if (ses->ipv6_dp && !list_empty(&ses->ipv6_dp->prefix_list)) {
 		///FIXME only first prefix is passed to env
 		struct ipv6db_addr_t *a = list_first_entry(&ses->ipv6_dp->prefix_list,
 							   typeof(*a), entry);

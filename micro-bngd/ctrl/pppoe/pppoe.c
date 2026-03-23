@@ -528,12 +528,12 @@ static struct pppoe_conn_t *allocate_channel(struct pppoe_serv_t *serv, const ui
 static void connect_channel(struct pppoe_conn_t *conn)
 {
 	/*int sock;
-	struct sockaddr_pppox sp;
+	struct sockaddr_pppox sp;*/
 
 	triton_event_fire(EV_CTRL_STARTING, &conn->ppp.ses);
 	triton_event_fire(EV_CTRL_STARTED, &conn->ppp.ses);
 
-	sock = net->socket(AF_PPPOX, SOCK_DGRAM, PX_PROTO_OE);
+	/*sock = net->socket(AF_PPPOX, SOCK_DGRAM, PX_PROTO_OE);
 	if (sock < 0) {
 		log_error("pppoe: socket(PPPOX): %s\n", strerror(errno));
 		goto out_err;

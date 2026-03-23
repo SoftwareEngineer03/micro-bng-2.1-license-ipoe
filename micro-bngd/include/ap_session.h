@@ -139,7 +139,7 @@ struct ap_session
 	uint32_t vpp_policer_id_up;
 	uint32_t vpp_policer_id_down;
 	uint32_t clientip;
-  uint32_t is_radius_ip;
+	uint32_t is_radius_ip;
 
   struct ppp_info_s ppp_info;
 

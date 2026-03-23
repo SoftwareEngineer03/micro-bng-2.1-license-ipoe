@@ -302,9 +302,12 @@ int get_ipv6_dp_prefix_len()
   int ipv6_dp_prefix_len = 64;
 
   struct conf_sect_t *s = conf_get_section("ipv6-pool");
-	struct conf_option_t *opt;
+  struct conf_option_t *opt;
 
-	list_for_each_entry(opt, &s->items, entry) {
+  if(!s)
+    return 0;
+  
+  list_for_each_entry(opt, &s->items, entry) {
     if (!strcmp(opt->name, "delegate")) {
 
       char *val = _strdup(opt->val);
@@ -337,8 +340,8 @@ int get_ipv6_dp_prefix_len()
       err:
       log_error("ipv6_pool(2): failed to parse '%s'\n", val);
       _free(val);
-		}
-	}
+    }
+  }
   return ipv6_dp_prefix_len;
 }
 
@@ -450,14 +453,6 @@ int main(int _argc, char **_argv)
 	openssl_init();
 #endif
 
-	triton_register_init(0, log_version);
-
-	if (triton_load_modules("modules")) {
-		log_emerg("main: triton_load_modules: failed\n");
-		return EXIT_FAILURE;
-	}
-
-
   vpp_api_connection_acct();
   vpp_api_connection();
   vpp_api_show_version();
@@ -503,6 +498,14 @@ int main(int _argc, char **_argv)
   vpp_api_policer_classify_set_interface(sw_if_index, download_classify_table_index, ipv6_classify_table_index, ~0, 1);
 
   upload_classify_table_index = vpp_api_classify_add_del_table(0, 1, mask_up, sizeof(mask_up), ~0, 1);
+
+
+	triton_register_init(0, log_version);
+
+	if (triton_load_modules("modules")) {
+		log_emerg("main: triton_load_modules: failed\n");
+		return EXIT_FAILURE;
+	}
 
 	triton_run();
 
