@@ -308,11 +308,11 @@ static int show_ses_exec(const char *cmd, char * const *f, int f_cnt, void *cli)
     dumpses = calloc(1, sizeof(struct ap_session));
     memcpy(dumpses, ses, sizeof(struct ap_session));
 
-    if (ses->ipv4 && ses->ipv4->owner) {
+    if (ses->ipv4 /*&& ses->ipv4->owner*/) {
       dumpses->peeraddr_4showsessions = ses->ipv4->peer_addr;
     }
 
-    if (ses->ipv6 && ses->ipv6->owner) {
+    if (ses->ipv6 /*&& ses->ipv6->owner*/) {
       struct ipv6db_addr_t *a;
     	if (!ses->ipv6 || list_empty(&ses->ipv6->addr_list)) {
     		
@@ -779,7 +779,7 @@ static void print_comp_for_realtime(struct ap_session *ses, char *buf)
 
 void get_stats(struct ap_session *ses) {
 	pppoe_session_accounting_t accounting;
- 	vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
+ 	vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
 	stats.rx_bytes = accounting.acct_input_octets + accounting.acct_input_octets_ipv6;
 	stats.tx_bytes = accounting.acct_output_octets + accounting.acct_output_octets_ipv6;
 	stats.rx_packets = accounting.acct_input_packets + accounting.acct_input_packets_ipv6;
@@ -795,7 +795,7 @@ static void print_traffic(struct ap_session *ses, char *buf)
 {
 
   pppoe_session_accounting_t accounting;
-  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
+  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
   
   snprintf(buf, CELL_SIZE, "{tx:%llu, rx:%llu}", 
     accounting.acct_output_octets + accounting.acct_output_octets_ipv6,
@@ -944,7 +944,7 @@ void show_one_user(struct ap_session *ses, void *cli)
 
   char buf[256];
   pppoe_session_accounting_t accounting;
-  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
+  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
   cli_sendv(cli, "  MAC=%02x:%02x:%02x:%02x:%02x:%02x login=%s SessionID=0x%04x (net=0x%04x)\n",
     ses->ppp_info.addr[0], ses->ppp_info.addr[1], ses->ppp_info.addr[2], 
     ses->ppp_info.addr[3], ses->ppp_info.addr[4], ses->ppp_info.addr[5],
@@ -1018,7 +1018,7 @@ static void show_traffic(struct ap_session *ses, void *cli)
 
   char buf[256];
   pppoe_session_accounting_t accounting;
-  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
+  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
   print_traffic(ses, buf);
   cli_sendv(cli, "%s", buf);
 }

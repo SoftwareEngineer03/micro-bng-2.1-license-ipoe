@@ -100,6 +100,7 @@ static void *pd_key2;
 static void *pd_key3;
 
 static struct log_file_t *log_file;
+static struct log_file_t *ipoe_log_file;
 static struct log_file_t *fail_log_file;
 
 static mempool_t lpd_pool;
@@ -594,14 +595,19 @@ static void per_interface_log(struct log_target_t *t, struct log_msg_t *msg, str
 
 static void general_log(struct log_target_t *t, struct log_msg_t *msg, struct ap_session *ses)
 {
-	if (ses && !conf_copy) {
-		log_free_msg(msg);
-		return;
-	}
+    if (ses && !conf_copy) {
+        log_free_msg(msg);
+        return;
+    }
 
-	set_hdr(msg, ses);
-	queue_log(log_file, msg);
+    set_hdr(msg, ses);
+
+    if(ses && ses->is_ipoe)
+        queue_log(ipoe_log_file, msg);
+    else
+        queue_log(log_file, msg);
 }
+
 
 static struct ap_private *find_pd(struct ap_session *ses, void *pd_key)
 {
@@ -831,10 +837,11 @@ static void reopen_all_interface_logs(void)
 static void general_reopen(void)
 {
 	int main_log_result = reopen_log_file(log_file, "log-file");
+    int ipoe_log_result = reopen_log_file(ipoe_log_file, "ipoe-log-file");
 
-    if (main_log_result != 0) {
+    if (main_log_result != 0 || ipoe_log_result != 0) {
         log_emerg("log_file: partial reopen failure (main:%d, ipoe:%d)\n",
-                    main_log_result);
+                    main_log_result, ipoe_log_result);
     }
 }
 
@@ -1695,6 +1702,18 @@ static void init(void)
 		if (log_file_open(log_file, opt)) {
 			log_emerg("log_file:init:log_file_open: failed\n");
 			free(log_file);
+			_exit(EXIT_FAILURE);
+		}
+	}
+
+	opt = conf_get_opt("log", "ipoe-log-file");
+	if (opt) {
+		ipoe_log_file = malloc(sizeof(*ipoe_log_file));
+		memset(ipoe_log_file, 0, sizeof(*ipoe_log_file));
+		log_file_init(ipoe_log_file);
+		if (log_file_open(ipoe_log_file, opt)) {
+			log_emerg("log_file:init:log_file_open: failed\n");
+			free(ipoe_log_file);
 			_exit(EXIT_FAILURE);
 		}
 	}

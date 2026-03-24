@@ -21,6 +21,7 @@ void vpp_api_connection();
 void vpp_api_connection_acct();
 void vpp_api_show_version();
 void vpp_api_show_interface();
+u32 vpp_api_ipoe_add_del_session(u32 ip_address, u8 *mac_address, u16 session_id, char *acct_session_id, u32 sw_if_index, u8 *user_name, u32 vlan_id, u8 is_add);
 u32 vpp_api_pppoe_add_del_session(u32 ip_address, u8 *mac_address, u16 session_id, char *acct_session_id, u32 sw_if_index, u8 *user_name, u32 vlan_id, u8 is_add);
 u32 vpp_api_ipv6_pppoe_add_del_session(u8 *ipv6_address, u8 prefix_len, u8 *mac_address, u16 session_id, char *acct_session_id, u32 sw_if_index, u8 *user_name, u32 vlan_id, u8 is_add);
 void vpp_api_ip_route_add_del(u32 prefix, u8 prefix_len, u32 nexthop, u32 sw_if_index, u32 table_id, bool is_add);
@@ -34,5 +35,5 @@ u32 vpp_api_classify_add_del_table(u32 skip_n_vectors, u32 match_n_vectors, u8 *
 void vpp_api_classify_add_del_session(u32 table_index, u32 policer_index, u8 *match, u32 match_len, bool is_add);
 void vpp_api_policer_classify_set_interface(u32 sw_if_index, u32 ip4_table_index, u32 ip6_table_index, u32 l2_table_index, bool is_add);
 int vpp_api_sw_interface_set_unnumbered(u32 unnumbered_sw_if_index, u32 sw_if_index, bool is_add);
-void vpp_api_pppoe_session_accounting(u8 *mac_address, pppoe_session_accounting_t *accounting);
+void vpp_api_pppoe_session_accounting(u8 *mac_address, u32 ip_address, pppoe_session_accounting_t *accounting, u8 is_ipoe);
 

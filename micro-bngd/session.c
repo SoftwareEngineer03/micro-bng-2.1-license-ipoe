@@ -67,7 +67,7 @@ int __export sock_fd;
 int __export sock6_fd;
 int __export urandom_fd;
 int __export ap_shutdown;
-int __export test_parameter;
+int __export test_parameter = 0;
 
 #if __WORDSIZE == 32
 static spinlock_t seq_lock;
@@ -102,6 +102,7 @@ void __export ap_session_init(struct ap_session *ses)
 	ses->microbng_bandwidth_min_up = 20000;
 	ses->microbng_bandwidth_min_down = 20000;
   ses->ppp_info.disc_sock = -1;
+  ses->is_ipoe = 0;
 	
 }
 
@@ -440,7 +441,7 @@ int __export ap_session_read_stats(struct ap_session *ses, struct rtnl_link_stat
 	}*/
 
   pppoe_session_accounting_t accounting;
-	vpp_api_pppoe_session_accounting(ses->ppp_info.addr, &accounting);
+	vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
 
 	stats->rx_packets = accounting.acct_input_packets + accounting.acct_input_packets_ipv6;
 	stats->tx_packets = accounting.acct_output_packets + accounting.acct_output_packets_ipv6;

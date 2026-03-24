@@ -42,6 +42,8 @@
 
 #include "memdebug.h"
 
+#include "vppapi.h"
+
 #define USERNAME_UNSET 0
 #define USERNAME_IFNAME 1
 #define USERNAME_LUA 2
@@ -110,6 +112,16 @@ struct local_net {
 };
 
 enum {SID_MAC, SID_IP};
+
+#define DEFAULT_IPOE_IDLE_TIMEOUT 180
+
+extern u32 upload_classify_table_index;
+extern u32 download_classify_table_index;
+
+int dflt_down_speed;
+int dflt_up_speed;
+double down_burst_factor;
+double up_burst_factor;
 
 static int conf_check_exists;
 static int conf_dhcpv4 = 1;
@@ -1063,13 +1075,19 @@ static void __ipoe_session_activate(struct ipoe_session *ses)
 	__sync_add_and_fetch(&stat_active, 1);
 	ses->started = 1;
 
+    __sync_add_and_fetch(&ap_session_stat.starting, 1);
+    __sync_add_and_fetch(&ap_session_stat.incoming, 1);
+    
 	ap_session_activate(&ses->ses);
 
 	if (ses->ifindex == -1 && !serv->opt_ifcfg) {
+        log_ppp_debug("Your address: 0x%x, Router: 0x%x, opt_src: 0x%x\n", ses->yiaddr, ses->router, serv->opt_src);
 		if (!serv->opt_ip_unnumbered)
-			iproute_add(serv->ifindex, ses->router, ses->yiaddr, 0, conf_proto, ses->mask, 0);
+			//iproute_add(serv->ifindex, ses->router, ses->yiaddr, 0, conf_proto, ses->mask, 0);
+			vpp_api_ip_route_add_del(ses->yiaddr, 32, ses->router, 0, 0, 1);
 		else
-			iproute_add(serv->ifindex, serv->opt_src ?: ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+			//iproute_add(serv->ifindex, serv->opt_src ?: ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+			vpp_api_ip_route_add_del(ses->yiaddr, 32, serv->opt_src ?: ses->router, 0, 0, 1);
 	}
 
 	if (ses->l4_redirect)
@@ -1163,14 +1181,57 @@ static void ipoe_session_started(struct ap_session *s)
 {
 	struct ipoe_session *ses = container_of(s, typeof(*ses), ses);
 
+    char policy_name[64];
+    
 	log_ppp_info1("ipoe: session started\n");
 
 	if (ses->timer.tpd)
 		triton_timer_mod(&ses->timer, 0);
 
+    log_ppp_debug("peer_addr: 0x%x, Your address: 0x%x, Router: 0x%x\n", ses->ses.ipv4->peer_addr, ses->yiaddr, ses->router);
+
+    vpp_api_ipoe_add_del_session(ses->ses.ipv4->peer_addr, NULL, 0, ses->ses.sessionid, ~0, ses->ses.username?: "", ses->serv->vid, 1);
+
+    if(ses->ses.microbng_bandwidth_max_down == 0)
+         ses->ses.microbng_bandwidth_max_down = dflt_down_speed;
+    if(ses->ses.microbng_bandwidth_max_up == 0)
+      ses->ses.microbng_bandwidth_max_up = dflt_up_speed;
+   
+    uint32_t ip_address = ses->ses.ipv4->peer_addr;
+    log_ppp_debug(" IPoE vid : %d, Acct-Session_id : %s, username : %s\n", ses->serv->vid, ses->ses.sessionid, ses->ses.username?: "");
+    log_ppp_debug(" max_up: %d, max_down: %d, min_up: %d, min_down: %d, down_burst_factor: %f, up_burst_factor: %f\n", ses->ses.microbng_bandwidth_max_up,
+        ses->ses.microbng_bandwidth_max_down, ses->ses.microbng_bandwidth_min_up, ses->ses.microbng_bandwidth_min_down,
+        down_burst_factor, up_burst_factor);
+
+    /* download policer */
+    snprintf(policy_name, sizeof(policy_name), "down%s", ses->ses.sessionid);
+    u32 policer_index = vpp_api_policer_add_del(policy_name, ses->ses.microbng_bandwidth_max_down, ses->ses.microbng_bandwidth_max_down * down_burst_factor * 100, 0, 0, 1);
+    u8 match_down[48];
+    memset(match_down, 0, sizeof(match_down));
+    match_down[30] = ( ip_address ) & 0xFF;
+    match_down[31] = ( ip_address >> 8 ) & 0xFF;
+    match_down[32] = ( ip_address >> 16 ) & 0xFF;
+    match_down[33] = ( ip_address >> 24 ) & 0xFF;
+    log_ppp_debug("match ip_address %d.%d.%d.%d\n", match_down[30], match_down[31], match_down[32], match_down[33]);
+    vpp_api_classify_add_del_session(download_classify_table_index, policer_index, match_down, sizeof(match_down), 1);
+    ses->ses.vpp_policer_id_down = policer_index;
+
+    /* upload policer */
+    snprintf(policy_name, sizeof(policy_name), "up%s", ses->ses.sessionid);
+    policer_index = vpp_api_policer_add_del(policy_name, ses->ses.microbng_bandwidth_max_up, ses->ses.microbng_bandwidth_max_up * up_burst_factor * 100, 0, 0, 1);
+    u8 match_up[16];
+    memset(match_up, 0, sizeof(match_up));
+    memcpy(&match_up[6], ses->hwaddr, sizeof(ses->hwaddr));
+    log_ppp_debug("%02x:%02x:%02x:%02x:%02x:%02x",
+		match_up[0], match_up[1], match_up[2], match_up[3], match_up[4], match_up[5]);
+    vpp_api_classify_add_del_session(upload_classify_table_index, policer_index, match_up, sizeof(match_up), 1);
+    ses->ses.vpp_policer_id_up = policer_index;
+    ses->ses.clientip = ip_address;
+
 	if (ses->ses.ipv4->peer_addr != ses->yiaddr)
 		//ipaddr_add_peer(ses->ses.ifindex, ses->router, ses->yiaddr); // breaks quagga
-		iproute_add(ses->ses.ifindex, ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+		//iproute_add(ses->ses.ifindex, ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+		vpp_api_ip_route_add_del(ses->yiaddr, 32, ses->router, 0, 0, 1);
 
 	if (ses->ifindex != -1 && ses->xid) {
 		ses->dhcpv4 = dhcpv4_create(ses->ctrl.ctx, ses->ses.ifname, "");
@@ -1228,8 +1289,41 @@ static void ipoe_session_finished(struct ap_session *s)
 	struct unit_cache *uc;
 	struct ifreq ifr;
 
+    char policy_name[64];
+    u32 policer_index;
+
 	log_ppp_info1("ipoe: session finished\n");
 
+    uint32_t ip_address = ses->ses.clientip;
+
+    if(ip_address) {
+        vpp_api_ipoe_add_del_session(ses->ses.ipv4->peer_addr, NULL, 0, ses->ses.sessionid, ~0, ses->ses.username?: "", ses->serv->vid, 0);
+
+        /* download policer */
+        policer_index = ses->ses.vpp_policer_id_down;
+        snprintf(policy_name, sizeof(policy_name), "down%s", ses->ses.sessionid);
+        vpp_api_policer_add_del(policy_name, ses->ses.microbng_bandwidth_max_down, ses->ses.microbng_bandwidth_max_down * down_burst_factor * 100, 0, 0, 0);
+        u8 match_down[48];
+        memset(match_down, 0, sizeof(match_down));
+        match_down[30] = ( ip_address ) & 0xFF;
+        match_down[31] = ( ip_address >> 8 ) & 0xFF;
+        match_down[32] = ( ip_address >> 16 ) & 0xFF;
+        match_down[33] = ( ip_address >> 24 ) & 0xFF;
+        log_ppp_debug("match ip_address %d.%d.%d.%d\n", match_down[30], match_down[31], match_down[32], match_down[33]);
+        vpp_api_classify_add_del_session(download_classify_table_index, policer_index, match_down, sizeof(match_down), 0);
+
+        /* upload policer */
+        policer_index = ses->ses.vpp_policer_id_up;
+        snprintf(policy_name, sizeof(policy_name), "up%s", ses->ses.sessionid);
+        vpp_api_policer_add_del(policy_name, ses->ses.microbng_bandwidth_max_up, ses->ses.microbng_bandwidth_max_up * up_burst_factor * 100, 0, 0, 0);
+        u8 match_up[16];
+        memset(match_up, 0, sizeof(match_up));
+        memcpy(&match_up[6], ses->hwaddr, sizeof(ses->hwaddr));
+        log_ppp_debug("%02x:%02x:%02x:%02x:%02x:%02x",
+    		match_up[0], match_up[1], match_up[2], match_up[3], match_up[4], match_up[5]);
+        vpp_api_classify_add_del_session(upload_classify_table_index, policer_index, match_up, sizeof(match_up), 0);
+    }
+    
 	if (ses->ifindex != -1) {
 		if (uc_size < conf_unit_cache) {
 			strcpy(ifr.ifr_name, s->ifname);
@@ -1253,10 +1347,13 @@ static void ipoe_session_finished(struct ap_session *s)
 			ipoe_nl_delete(ses->ifindex);
 	} else if (ses->started) {
 		if (!serv->opt_ifcfg) {
+            log_ppp_debug("[del] Your address: 0x%x, Router: 0x%x, opt_src: 0x%x\n", ses->yiaddr, ses->router, serv->opt_src);
 			if (!serv->opt_ip_unnumbered)
-				iproute_del(serv->ifindex, ses->router, ses->yiaddr, 0, conf_proto, ses->mask, 0);
+				//iproute_del(serv->ifindex, ses->router, ses->yiaddr, 0, conf_proto, ses->mask, 0);
+                vpp_api_ip_route_add_del(ses->yiaddr, 32, ses->router, 0, 0, 0);
 			else
-				iproute_del(serv->ifindex, serv->opt_src ?: ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+				//iproute_del(serv->ifindex, serv->opt_src ?: ses->router, ses->yiaddr, 0, conf_proto, 32, 0);
+                vpp_api_ip_route_add_del(ses->yiaddr, 32, serv->opt_src ?: ses->router, 0, 0, 0);
 		}
 	}
 
@@ -2256,6 +2353,8 @@ struct ipoe_session *ipoe_session_alloc(const char *ifname)
 	ses->ses.idle_timeout = conf_idle_timeout;
 	ses->ses.session_timeout = conf_session_timeout;
 
+    ses->ses.is_ipoe = 1;
+
 	ses->lease_time = conf_lease_time;
 	ses->renew_time = conf_renew_time;
 	ses->rebind_time = conf_rebind_time;
@@ -2999,6 +3098,12 @@ static void add_interface(const char *ifname, int ifindex, const char *opt, int 
 	int opt_check_mac_change = conf_check_mac_change;
 	struct ifreq ifr;
 	uint8_t hwaddr[ETH_ALEN];
+
+    char vpp_intf[64];
+    snprintf(vpp_intf, sizeof(vpp_intf), "LanEthernet1/0/0.%d", vid);
+    u32 sw_if_index = vpp_api_get_iface_by_name(vpp_intf);
+    log_debug("%s sw_if_name: %u\n", vpp_intf, sw_if_index);
+    vpp_api_policer_classify_set_interface(sw_if_index, upload_classify_table_index, upload_classify_table_index, ~0, 1);
 
 	str0 = strchr(opt, ',');
 	if (str0) {
@@ -3837,6 +3942,22 @@ static void load_local_nets(struct conf_sect_t *sect)
 	}
 }
 
+static int parse_dflt_shaper(const char *opt, int *down_speed, int *up_speed)
+{
+	char *endptr;
+
+	*down_speed = strtol(opt, &endptr, 10);
+
+	if (*endptr != '/'){
+		*up_speed = *down_speed;
+		return 0;
+	}
+
+	opt = endptr + 1;
+	*up_speed = strtol(opt, &endptr, 10);
+	return 0;
+}
+
 static void load_config(void)
 {
 	const char *opt;
@@ -4084,7 +4205,13 @@ static void load_config(void)
 	if (opt)
 		conf_idle_timeout = atoi(opt);
 	else
-		conf_idle_timeout = 0;
+		conf_idle_timeout = DEFAULT_IPOE_IDLE_TIMEOUT;
+
+    opt = conf_get_opt("ipoe", "disconnection-timeout");
+	if (opt)
+		conf_idle_timeout = atoi(opt);
+	else
+		conf_idle_timeout = DEFAULT_IPOE_IDLE_TIMEOUT;
 
 	opt = conf_get_opt("ipoe", "session-timeout");
 	if (opt)
@@ -4131,6 +4258,18 @@ static void load_config(void)
 	if (triton_module_loaded("radius"))
 		load_radius_attrs();
 #endif
+
+    opt = conf_get_opt("shaper", "rate-limit");
+    if (opt)
+      parse_dflt_shaper(opt, &dflt_down_speed, &dflt_up_speed);
+    
+    opt = conf_get_opt("shaper", "down-burst-factor");
+    if (opt)
+      down_burst_factor = strtod(opt, NULL);
+  
+    opt = conf_get_opt("shaper", "up-burst-factor");
+    if (opt)
+      up_burst_factor = strtod(opt, NULL);
 
 	parse_offer_delay(conf_get_opt("ipoe", "offer-delay"));
 

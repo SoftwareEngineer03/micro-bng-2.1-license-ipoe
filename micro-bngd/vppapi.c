@@ -184,6 +184,60 @@ pppoe_add_del_session_cb (vapi_ctx_t ctx, void *caller_ctx,
 	return VAPI_OK;
 }
 
+u32 __export vpp_api_ipoe_add_del_session(u32 ip_address, u8 *mac_address, u16 session_id, char *acct_session_id, u32 sw_if_index, u8 *user_name, u32 vlan_id, u8 is_add)
+{
+	pthread_mutex_lock(&vpp_api_mutex);
+
+	//printf ("--- Add/delete pppoe session using nonblocking API ---\n");
+
+	test_pppoe_add_del_session_ctx_t clcs;
+	clib_memset (&clcs, 0, sizeof (clcs));
+	
+	vapi_msg_pppoe_add_del_session *cl = vapi_alloc_pppoe_add_del_session (ctx);
+    cl->payload.is_ipoe = 1;
+	cl->payload.is_add = is_add;
+	cl->payload.session_id = session_id;
+	cl->payload.vlan_id = vlan_id;
+  cl->payload.prefix_len = 0;
+
+  clib_memset(cl->payload.user_name, 0, 16);
+
+  clib_memset(cl->payload.acct_session_id, 0, 16);
+  clib_memcpy(cl->payload.acct_session_id, acct_session_id, strlen(acct_session_id)>16? 16:strlen(acct_session_id));
+
+	cl->payload.sw_if_index = sw_if_index;
+	
+	cl->payload.client_ip.af = ADDRESS_IP4;
+
+	cl->payload.client_ip.un.ip4[0] = ( ip_address ) & 0xFF;
+	cl->payload.client_ip.un.ip4[1] = ( ip_address >> 8 ) & 0xFF;
+	cl->payload.client_ip.un.ip4[2] = ( ip_address >> 16 ) & 0xFF;
+	cl->payload.client_ip.un.ip4[3] = ( ip_address >> 24 ) & 0xFF;
+
+	int j;
+	/*for (j = 0; j < 6; ++j) {
+		cl->payload.client_mac[j] = mac_address[j];
+	}*/
+
+	for (j = 0; j < strlen(user_name) && j < 15; ++j) {
+		cl->payload.user_name[j] = user_name[j];
+	}
+
+      vapi_error_e rv;
+	  while (VAPI_EAGAIN ==
+	     (rv =
+	          vapi_pppoe_add_del_session (ctx, cl, pppoe_add_del_session_cb, &clcs)))
+      ;
+
+	  while (VAPI_EAGAIN == (rv = vapi_dispatch (ctx)))
+      ;
+
+	usleep(100);
+	pthread_mutex_unlock(&vpp_api_mutex);
+
+	return clcs.sw_if_index_storage;
+}
+
 u32 __export vpp_api_pppoe_add_del_session(u32 ip_address, u8 *mac_address, u16 session_id, char *acct_session_id, u32 sw_if_index, u8 *user_name, u32 vlan_id, u8 is_add)
 {
 	pthread_mutex_lock(&vpp_api_mutex);
@@ -194,6 +248,7 @@ u32 __export vpp_api_pppoe_add_del_session(u32 ip_address, u8 *mac_address, u16 
 	clib_memset (&clcs, 0, sizeof (clcs));
 	
 	vapi_msg_pppoe_add_del_session *cl = vapi_alloc_pppoe_add_del_session (ctx);
+    cl->payload.is_ipoe = 0;
 	cl->payload.is_add = is_add;
 	cl->payload.session_id = session_id;
 	cl->payload.vlan_id = vlan_id;
@@ -252,6 +307,7 @@ u32 __export vpp_api_ipv6_pppoe_add_del_session(u8 *ipv6_address, u8 prefix_len,
 	clib_memset (&clcs, 0, sizeof (clcs));
 	
 	vapi_msg_pppoe_add_del_session *cl = vapi_alloc_pppoe_add_del_session (ctx);
+    cl->payload.is_ipoe = 0;
 	cl->payload.is_add = is_add;
 	cl->payload.session_id = session_id;
 	cl->payload.vlan_id = vlan_id;
@@ -904,7 +960,7 @@ pppoe_session_accounting_cb (vapi_ctx_t ctx, void *caller_ctx,
 	return VAPI_OK;
 }
 
-void __export vpp_api_pppoe_session_accounting(u8 *mac_address, pppoe_session_accounting_t *accounting)
+void __export vpp_api_pppoe_session_accounting(u8 *mac_address, u32 ip_address, pppoe_session_accounting_t *accounting, u8 is_ipoe)
 {
 	pthread_mutex_lock(&vpp_api_acct_mutex);
 
@@ -922,6 +978,15 @@ void __export vpp_api_pppoe_session_accounting(u8 *mac_address, pppoe_session_ac
 	{
 		cl->payload.client_mac[j] = mac_address[j];
 	}
+
+    cl->payload.client_ip.af = ADDRESS_IP4;
+
+	cl->payload.client_ip.un.ip4[0] = ( ip_address ) & 0xFF;
+	cl->payload.client_ip.un.ip4[1] = ( ip_address >> 8 ) & 0xFF;
+	cl->payload.client_ip.un.ip4[2] = ( ip_address >> 16 ) & 0xFF;
+	cl->payload.client_ip.un.ip4[3] = ( ip_address >> 24 ) & 0xFF;
+
+    cl->payload.is_ipoe = is_ipoe;
 
 	/*printf ("(1) Get pppoe session accounting client_ip %u.%u.%u.%u\n",
 		cl->payload.client_ip.un.ip4[0], cl->payload.client_ip.un.ip4[1], 

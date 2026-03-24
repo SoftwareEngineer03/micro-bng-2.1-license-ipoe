@@ -141,6 +141,8 @@ struct ap_session
 	uint32_t clientip;
 	uint32_t is_radius_ip;
 
+	unsigned char is_ipoe;
+
   struct ppp_info_s ppp_info;
 
   /********** for show sessions **********/
