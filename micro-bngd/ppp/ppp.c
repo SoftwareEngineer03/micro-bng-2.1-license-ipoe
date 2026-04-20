@@ -234,7 +234,9 @@ exit:
 static void destroy_ppp_channel(struct ppp_t *ppp)
 {
 	//triton_md_unregister_handler(&ppp->chan_hnd, 1);
-	close(ppp->fd);
+	if (ppp->fd >= 0) {
+    	close(ppp->fd);
+    }
 	ppp->fd = -1;
 	ppp->chan_fd = -1;
 
