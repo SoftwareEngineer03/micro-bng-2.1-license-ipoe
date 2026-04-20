@@ -57,7 +57,7 @@ static int conf_sid_source;
 static int conf_seq_save_timeout = 10;
 static int conf_session_timeout;
 static const char *conf_seq_file;
-int __export conf_max_sessions = 0;
+int __export conf_max_sessions = 1;
 int __export conf_max_starting;
 
 pthread_rwlock_t __export ses_lock = PTHREAD_RWLOCK_INITIALIZER;
@@ -67,7 +67,7 @@ int __export sock_fd;
 int __export sock6_fd;
 int __export urandom_fd;
 int __export ap_shutdown;
-int __export test_parameter = 0;
+int __export test_parameter = 1;
 
 #if __WORDSIZE == 32
 static spinlock_t seq_lock;
@@ -761,13 +761,13 @@ static int update_license_exec(const char *cmd, char * const *f, int f_cnt, void
     int ret = get_data_from_authfile(microbng_uuid, &lic_data);
     if(ret) {
         log_warn("license key is invalid.\n");
-        conf_max_sessions = 0;
-        test_parameter  = 0;
+        conf_max_sessions = 1;
+        test_parameter  = 1;
     } else {
         if(get_remaining(lic_data.expiry) <= 0) {
             log_warn("license is expired.\n");
-            conf_max_sessions = 0;
-            test_parameter  = 0;
+            conf_max_sessions = 1;
+            test_parameter  = 1;
         } else {
             conf_max_sessions = lic_data.session_count;
             test_parameter  = lic_data.session_count;
@@ -899,13 +899,13 @@ static void * license_thread(void *data)
         ret = get_data_from_authfile(microbng_uuid, &lic_data);
         if(ret) {
             log_warn("license key is invalid.\n");
-            conf_max_sessions = 0;
-            test_parameter  = 0;
+            conf_max_sessions = 1;
+            test_parameter  = 1;
         } else {
             if(get_remaining(lic_data.expiry) <= 0) {
                 log_warn("license is expired.\n");
-                conf_max_sessions = 0;
-                test_parameter  = 0;
+                conf_max_sessions = 1;
+                test_parameter  = 1;
             } else {
                 conf_max_sessions = lic_data.session_count;
                 test_parameter  = lic_data.session_count;
