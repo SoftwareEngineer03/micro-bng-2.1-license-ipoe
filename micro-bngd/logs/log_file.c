@@ -99,9 +99,9 @@ static void *pd_key1;
 static void *pd_key2;
 static void *pd_key3;
 
-static struct log_file_t *log_file;
-static struct log_file_t *ipoe_log_file;
-static struct log_file_t *fail_log_file;
+static struct log_file_t *log_file = NULL;
+static struct log_file_t *ipoe_log_file = NULL;
+static struct log_file_t *fail_log_file = NULL;
 
 static mempool_t lpd_pool;
 static mempool_t fpd_pool;
@@ -262,6 +262,12 @@ static void queue_log(struct log_file_t *lf, struct log_msg_t *msg)
 {
 	int r;
 
+    if (!lf) {
+       log_free_msg(msg);
+       return;
+    }
+     
+
 	spin_lock(&lf->lock);
 	list_add_tail(&msg->entry, &lf->msgs);
 	if (lf->fd != -1) {
@@ -278,6 +284,11 @@ static void queue_log(struct log_file_t *lf, struct log_msg_t *msg)
 static void queue_log_list(struct log_file_t *lf, struct list_head *l)
 {
 	int r;
+
+    if (!lf) {
+       purge(l);
+       return;
+    }
 
 	spin_lock(&lf->lock);
 	list_splice_init(l, &lf->msgs);
@@ -595,6 +606,8 @@ static void per_interface_log(struct log_target_t *t, struct log_msg_t *msg, str
 
 static void general_log(struct log_target_t *t, struct log_msg_t *msg, struct ap_session *ses)
 {
+    struct log_file_t *dst;
+
     if (ses && !conf_copy) {
         log_free_msg(msg);
         return;
@@ -602,10 +615,17 @@ static void general_log(struct log_target_t *t, struct log_msg_t *msg, struct ap
 
     set_hdr(msg, ses);
 
-    if(ses && ses->is_ipoe)
-        queue_log(ipoe_log_file, msg);
+    if (ses && ses->is_ipoe && ipoe_log_file)
+        dst = ipoe_log_file;
     else
-        queue_log(log_file, msg);
+        dst = log_file;
+
+    if (!dst) {
+        log_free_msg(msg);
+        return;
+    }
+
+    queue_log(dst, msg);
 }
 
 
@@ -836,8 +856,8 @@ static void reopen_all_interface_logs(void)
 
 static void general_reopen(void)
 {
-	int main_log_result = reopen_log_file(log_file, "log-file");
-    int ipoe_log_result = reopen_log_file(ipoe_log_file, "ipoe-log-file");
+    int main_log_result = log_file ? reopen_log_file(log_file, "log-file") : 0;
+    int ipoe_log_result = ipoe_log_file ? reopen_log_file(ipoe_log_file, "ipoe-log-file") : 0;
 
     if (main_log_result != 0 || ipoe_log_result != 0) {
         log_emerg("log_file: partial reopen failure (main:%d, ipoe:%d)\n",
