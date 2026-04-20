@@ -985,10 +985,10 @@ static void __ipoe_session_start(struct ipoe_session *ses)
 			ses->arph = NULL;
 		}
 
-		if (!ses->wait_start) {
+		//if (!ses->wait_start) {
 			__ipoe_session_activate(ses);
 			return;
-		}
+		//}
 	}
 
 	ses->timer.expire = ipoe_session_timeout;
