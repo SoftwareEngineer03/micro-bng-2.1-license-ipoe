@@ -36,16 +36,18 @@ static void devconf(struct ap_session *ses, const char *attr, const char *val)
 	int fd;
 	char fname[PATH_MAX];
 
-	sprintf(fname, "/proc/sys/net/ipv6/conf/%s/%s", ses->ifname, attr);
+	snprintf(fname, sizeof(fname), "/proc/sys/net/ipv6/conf/%s/%s", ses->ifname, attr);
 	fd = open(fname, O_WRONLY);
-	if (!fd) {
+	if (fd < 0) {
 		log_ppp_error("failed to open '%s': %s\n", fname, strerror(errno));
 		return;
 	}
 
-	write(fd, val, strlen(val));
+	if (write(fd, val, strlen(val)) < 0)
+		log_ppp_error("failed to write '%s': %s\n", fname, strerror(errno));
 
-	close(fd);
+	if (close(fd) < 0)
+		log_ppp_error("failed to close '%s': %s\n", fname, strerror(errno));
 }
 
 void ap_session_ifup(struct ap_session *ses)

@@ -46,6 +46,7 @@ int ipoe_nl_add_exclude(uint32_t addr, int mask)
 		return -1;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -82,6 +83,7 @@ void ipoe_nl_del_exclude(uint32_t addr)
 		return;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -114,6 +116,7 @@ int ipoe_nl_add_net(uint32_t addr, int mask)
 		return -1;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -150,6 +153,7 @@ void ipoe_nl_del_net(uint32_t addr)
 		return;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -181,6 +185,7 @@ void ipoe_nl_add_interface(int ifindex, uint8_t mode)
 		return;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -213,6 +218,7 @@ void ipoe_nl_del_interface(int ifindex)
 		return;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -253,6 +259,7 @@ int ipoe_nl_create()
 		return -1;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -317,6 +324,7 @@ int ipoe_nl_modify(int ifindex, uint32_t peer_addr, uint32_t addr, uint32_t gw, 
 		return -1;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -406,6 +414,7 @@ void ipoe_nl_get_sessions(struct list_head *list)
 	if (rth.fd == -1)
 		return;
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST;
@@ -438,6 +447,7 @@ void ipoe_nl_delete(int ifindex)
 		return;
 	}
 
+    memset(&req, 0, sizeof(req));
 	nlh = &req.n;
 	nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
