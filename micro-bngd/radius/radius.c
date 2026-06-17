@@ -446,8 +446,8 @@ static int rad_pwdb_check(struct pwdb_t *pwdb, struct ap_session *ses, pwdb_call
 	char username1[256];
 
 	if (!rpd) {
-		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
-		abort();
+		log_ppp_error("radius:%s: rpd not found, denying authentication instead of aborting\n", __func__);
+		return PWDB_DENIED;
 	}
 
 	if (conf_strip_realm || conf_default_realm) {
@@ -640,8 +640,8 @@ static void ses_started(struct ap_session *ses)
 	struct framed_route *fr;
 
 	if (!rpd) {
-		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
-		abort();
+		log_ppp_error("radius:%s: rpd not found, ignoring session-start event\n", __func__);
+		return;
 	}
 
 	if (rpd->session_timeout.expire_tv.tv_sec) {
@@ -683,8 +683,8 @@ static void ses_finishing(struct ap_session *ses)
 	struct framed_route *fr;
 
 	if (!rpd) {
-		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
-		abort();
+		log_ppp_error("radius:%s: rpd not found, ignoring session-finishing event\n", __func__);
+		return;
 	}
 
 	if (rpd->auth_ctx) {
@@ -723,8 +723,8 @@ static void ses_finished(struct ap_session *ses)
 	struct framed_ip6_route *fr6;
 
 	if (!rpd) {
-		log_emerg("radius:%s:BUG: rpd not found\n", __func__);
-		abort();
+		log_ppp_error("radius:%s: rpd not found, ignoring session-finished event\n", __func__);
+		return;
 	}
 
 	struct framed_route *fr = rpd->fr;

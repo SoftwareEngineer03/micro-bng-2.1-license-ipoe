@@ -1162,3 +1162,91 @@ hashtable64_ts_apply_callback_on_elements (
   return HASH_TABLE_OK;
 }
 
+
+//------------------------------------------------------------------------------
+/*
+   Non-destructive statistics helpers for runtime diagnostics.
+   They walk all buckets, count real nodes, and compare with num_elements.
+   These helpers are intentionally read-only and only lock one bucket at a time.
+*/
+hashtable_rc_t __export
+obj_hashtable_ts_get_stats (
+  obj_hash_table_t * const hashtblP,
+  myhashtable_stats_t * const statsP)
+{
+  size_t i;
+
+  if (!hashtblP || !statsP)
+    return HASH_TABLE_BAD_PARAMETER_HASHTABLE;
+
+  memset(statsP, 0, sizeof(*statsP));
+  statsP->size = hashtblP->size;
+  statsP->declared_elements = hashtblP->num_elements;
+
+  if (!hashtblP->nodes || !hashtblP->lock_nodes)
+    return HASH_TABLE_BAD_PARAMETER_HASHTABLE;
+
+  for (i = 0; i < hashtblP->size; i++) {
+    uint32_t chain = 0;
+    obj_hash_node_t *node;
+
+    pthread_mutex_lock(&hashtblP->lock_nodes[i]);
+    node = hashtblP->nodes[i];
+    while (node) {
+      chain++;
+      node = node->next;
+    }
+    pthread_mutex_unlock(&hashtblP->lock_nodes[i]);
+
+    if (chain) {
+      statsP->used_buckets++;
+      statsP->actual_elements += chain;
+      if (chain > statsP->max_chain)
+        statsP->max_chain = chain;
+    }
+  }
+
+  statsP->empty_buckets = statsP->size - statsP->used_buckets;
+  return HASH_TABLE_OK;
+}
+
+hashtable_rc_t __export
+hashtable64_ts_get_stats (
+  hash64_table_t * const hashtblP,
+  myhashtable_stats_t * const statsP)
+{
+  size_t i;
+
+  if (!hashtblP || !statsP)
+    return HASH_TABLE_BAD_PARAMETER_HASHTABLE;
+
+  memset(statsP, 0, sizeof(*statsP));
+  statsP->size = hashtblP->size;
+  statsP->declared_elements = hashtblP->num_elements;
+
+  if (!hashtblP->nodes || !hashtblP->lock_nodes)
+    return HASH_TABLE_BAD_PARAMETER_HASHTABLE;
+
+  for (i = 0; i < hashtblP->size; i++) {
+    uint32_t chain = 0;
+    hash64_node_t *node;
+
+    pthread_mutex_lock(&hashtblP->lock_nodes[i]);
+    node = hashtblP->nodes[i];
+    while (node) {
+      chain++;
+      node = node->next;
+    }
+    pthread_mutex_unlock(&hashtblP->lock_nodes[i]);
+
+    if (chain) {
+      statsP->used_buckets++;
+      statsP->actual_elements += chain;
+      if (chain > statsP->max_chain)
+        statsP->max_chain = chain;
+    }
+  }
+
+  statsP->empty_buckets = statsP->size - statsP->used_buckets;
+  return HASH_TABLE_OK;
+}

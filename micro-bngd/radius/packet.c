@@ -101,8 +101,9 @@ int rad_packet_build(struct rad_packet_t *pack, uint8_t *RA)
 				memcpy(ptr + 2, &attr->val.ipv6prefix.prefix, sizeof(attr->val.ipv6prefix.prefix));
 				break;
 			default:
-				log_emerg("radius:packet:BUG: unknown attribute type\n");
-				abort();
+				log_error("radius:packet: unknown attribute type %i, dropping packet build\n",
+				          attr->attr->type);
+				return -1;
 		}
 		ptr += attr->len;
 	}

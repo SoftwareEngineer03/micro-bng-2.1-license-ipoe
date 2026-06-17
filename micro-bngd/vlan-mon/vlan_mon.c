@@ -59,6 +59,8 @@ int __export vlan_mon_add(int ifindex, uint16_t proto, long *mask, int len)
 	} req;
 	int r = 0;
 
+	memset(&req, 0, sizeof(req));
+
 	if (vlan_mon_genl_id < 0)
 		return -1;
 
@@ -99,6 +101,8 @@ int __export vlan_mon_add_vid(int ifindex, uint16_t proto, uint16_t vid)
 		char buf[1024];
 	} req;
 	int r = 0;
+
+	memset(&req, 0, sizeof(req));
 
 	if (vlan_mon_genl_id < 0)
 		return -1;
@@ -141,6 +145,8 @@ int __export vlan_mon_del_vid(int ifindex, uint16_t proto, uint16_t vid)
 	} req;
 	int r = 0;
 
+	memset(&req, 0, sizeof(req));
+
 	if (vlan_mon_genl_id < 0)
 		return -1;
 
@@ -182,6 +188,8 @@ int __export vlan_mon_del(int ifindex, uint16_t proto)
 	} req;
 	int r = 0;
 
+	memset(&req, 0, sizeof(req));
+
 	if (vlan_mon_genl_id < 0)
 		return -1;
 
@@ -221,6 +229,8 @@ void vlan_mon_clean()
 		char buf[1024];
 	} req;
 
+	memset(&req, 0, sizeof(req));
+
 	if (rtnl_open_byproto(&rth, 0, NETLINK_GENERIC))
 		return;
 
@@ -247,6 +257,8 @@ int __export vlan_mon_check_busy(int ifindex, uint16_t vid)
 		char buf[1024];
 	} req;
 	int r = 0;
+
+	memset(&req, 0, sizeof(req));
 
 	if (vlan_mon_genl_id < 0)
 		return 0;

@@ -1154,11 +1154,19 @@ static void pppoe_recv_PADI(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 	len = ntohs(hdr->length);
 	for (n = 0; n < len; n += sizeof(*tag) + ntohs(tag->tag_len)) {
 		tag = (struct pppoe_tag *)(pack + ETH_HLEN + sizeof(*hdr) + n);
-		if (n + sizeof(*tag) + ntohs(tag->tag_len) > len)
+		if (n + sizeof(*tag) > len) {
+			if (conf_verbose)
+				log_warn("pppoe: discard PADI packet (truncated tag)\n");
 			return;
+		}
+		if (n + sizeof(*tag) + ntohs(tag->tag_len) > len) {
+			if (conf_verbose)
+				log_warn("pppoe: discard PADI packet (invalid tag length)\n");
+			return;
+		}
 		switch (ntohs(tag->tag_type)) {
 			case TAG_END_OF_LIST:
-				break;
+				goto padi_tags_done;
 			case TAG_SERVICE_NAME:
 			{
 				service_name_tag = tag;
@@ -1213,6 +1221,8 @@ static void pppoe_recv_PADI(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 				break;
 		}
 	}
+
+padi_tags_done:
 
 	if (conf_verbose)
 		print_packet(serv->ifname, "recv", pack);
@@ -1368,7 +1378,7 @@ static void pppoe_recv_PADR(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 		}
 		switch (ntohs(tag->tag_type)) {
 			case TAG_END_OF_LIST:
-				break;
+				goto padr_tags_done;
 			case TAG_SERVICE_NAME:
 			{
 				service_name_tag = tag;
@@ -1424,12 +1434,15 @@ static void pppoe_recv_PADR(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 				if (vendor_id == VENDOR_ADSL_FORUM)
 					if (conf_tr101)
 						tr101_tag = tag;
+				break;
 			case TAG_PPP_MAX_PAYLOAD:
 				if (ntohs(tag->tag_len) == 2)
 					ppp_max_payload = ntohs(*(uint16_t *)tag->tag_data);
 				break;
 		}
 	}
+
+padr_tags_done:
 
 	if (!ac_cookie_tag) {
 		if (conf_verbose)
@@ -1564,6 +1577,18 @@ static void pppoe_recv_PPP(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
 	struct pppoe_conn_t *conn;
 	uint16_t sid = ntohs(hdr->sid);
+
+  if (size < ETH_HLEN + sizeof(*hdr) + 2) {
+    if (conf_verbose)
+      log_warn("pppoe: discard short PPPoE session packet sid=%u size=%i\n", sid, size);
+    return;
+  }
+
+  if (ntohs(hdr->length) < 2) {
+    if (conf_verbose)
+      log_warn("pppoe: discard PPPoE session packet with empty PPP payload sid=%u\n", sid);
+    return;
+  }
 
   uint64_t key64;
   key64 = *((uint64_t *) (ethhdr->h_source)) << 16;

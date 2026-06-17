@@ -1017,8 +1017,6 @@ static void show_traffic(struct ap_session *ses, void *cli)
 {
 
   char buf[256];
-  pppoe_session_accounting_t accounting;
-  vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
   print_traffic(ses, buf);
   cli_sendv(cli, "%s", buf);
 }

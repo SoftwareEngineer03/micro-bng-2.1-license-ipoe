@@ -344,6 +344,10 @@ int pppoe_ppp_ses_start(struct pppoe_serv_t *serv)
 void pppoe_disc_stop(struct pppoe_serv_t *serv)
 {
 	struct disc_net *n = find_net(serv->net);
+	if (!n) {
+		log_warn("pppoe: disc: stop requested for unregistered interface %s\n", serv->ifname);
+		return;
+	}
 	struct tree *t = &n->tree[serv->ifindex & HASH_BITS];
 
 	pthread_mutex_lock(&t->lock);
@@ -357,6 +361,10 @@ void pppoe_disc_stop(struct pppoe_serv_t *serv)
 void pppoe_ppp_ses_stop(struct pppoe_serv_t *serv)
 {
 	struct disc_net *n = find_ppp_net(serv->net);
+	if (!n) {
+		log_warn("pppoe: sess: stop requested for unregistered interface %s\n", serv->ifname);
+		return;
+	}
 	struct tree *t = &n->tree[serv->ifindex & HASH_BITS];
 
 	pthread_mutex_lock(&t->lock);
@@ -573,6 +581,7 @@ static int disc_read(struct triton_md_handler_t *h)
 		if (hdr->type != 1) {
 			if (conf_verbose)
 				log_warn("pppoe: discarding packet (unsupported type %i)\n", hdr->type);
+			continue;
 		}
 
 		if (forward(net, src.sll_ifindex, pack, n))
@@ -669,6 +678,7 @@ static int ppp_ses_read(struct triton_md_handler_t *h)
 		if (hdr->type != 1) {
 			if (conf_verbose)
 				log_warn("pppoe: discarding packet (unsupported type %i)\n", hdr->type);
+			continue;
 		}
 
 		if (forward_ppp(net, src.sll_ifindex, pack, n))

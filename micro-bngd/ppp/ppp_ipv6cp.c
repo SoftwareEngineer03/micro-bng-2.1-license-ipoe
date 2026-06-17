@@ -921,15 +921,23 @@ int ipv6cp_option_register(struct ipv6cp_option_handler_t *h)
 
 struct ipv6cp_option_t *ipv6cp_find_option(struct ppp_t *ppp, struct ipv6cp_option_handler_t *h)
 {
-	struct ppp_ipv6cp_t *ipv6cp = container_of(ppp_find_layer_data(ppp, &ipv6cp_layer), typeof(*ipv6cp), ld);
+	struct ppp_layer_data_t *ld = ppp_find_layer_data(ppp, &ipv6cp_layer);
+	struct ppp_ipv6cp_t *ipv6cp;
 	struct ipv6cp_option_t *opt;
+
+	if (!ld) {
+		log_ppp_error("ipv6cp: layer data not found\n");
+		return NULL;
+	}
+
+	ipv6cp = container_of(ld, typeof(*ipv6cp), ld);
 
 	list_for_each_entry(opt, &ipv6cp->options, entry)
 		if (opt->h == h)
 			return opt;
 
-	log_emerg("ipv6cp: BUG: option not found\n");
-	abort();
+	log_ppp_error("ipv6cp: option not found, ignoring recoverable option event\n");
+	return NULL;
 }
 
 static struct ppp_layer_t ipv6cp_layer =

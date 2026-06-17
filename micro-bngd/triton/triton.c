@@ -454,7 +454,10 @@ void __export triton_context_set_priority(struct triton_context_t *ud, int prio)
 {
 	struct _triton_context_t *ctx = (struct _triton_context_t *)ud->tpd;
 
-	assert(prio >= 0 && prio < CTX_PRIO_MAX);
+	if (prio < 0 || prio >= CTX_PRIO_MAX) {
+		triton_log_error("triton: invalid context priority %i, ignoring", prio);
+		return;
+	}
 
 	ctx->priority = prio;
 }
@@ -740,10 +743,9 @@ void __export triton_run()
 	}
 
 	for(i = 0; i < thread_count; i++) {
-		t = create_thread();
-		if (!t) {
-			triton_log_error("triton_run:create_thread: %s", strerror(errno));
-			_exit(-1);
+		while (!(t = create_thread())) {
+			triton_log_error("triton_run:create_thread failed, retrying");
+			sleep(1);
 		}
 
 		list_add_tail(&t->entry, &threads);

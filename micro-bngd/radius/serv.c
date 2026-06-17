@@ -192,8 +192,11 @@ int rad_server_req_enter(struct rad_req_t *req)
 		return 0;
 	}
 
-	assert(!req->active);
-	assert(!req->entry.next);
+	if (req->active || req->entry.next) {
+		log_ppp_error("radius(%i): req_enter called for busy request %p active=%u queued=%u\n",
+		              req->serv->id, req, req->active, req->entry.next ? 1 : 0);
+		return -1;
+	}
 
 	pthread_mutex_lock(&req->serv->lock);
 
@@ -252,14 +255,21 @@ void rad_server_req_exit(struct rad_req_t *req)
 	if (!req->serv->req_limit)
 		return;
 
-	assert(req->active);
+	if (!req->active) {
+		log_ppp_error("radius(%i): req_exit called for inactive request %p\n", serv->id, req);
+		return;
+	}
 
 	req->active = 0;
 
 	pthread_mutex_lock(&serv->lock);
-	serv->req_cnt--;
+	if (serv->req_cnt > 0)
+		serv->req_cnt--;
+	else {
+		log_ppp_error("radius(%i): req_exit underflow for request %p; resetting counter\n", serv->id, req);
+		serv->req_cnt = 0;
+	}
 	log_ppp_debug("radius(%i): req_exit %i\n", serv->id, serv->req_cnt);
-	assert(serv->req_cnt >= 0);
 	if (serv->req_cnt < serv->req_limit) {
 		struct list_head *list = NULL;
 		if (!list_empty(&serv->req_queue[0]))

@@ -508,6 +508,116 @@ static int set_ac_name_exec(const char *cmd, char * const *f, int f_cnt, void *c
 //===================================
 
 
+
+static void show_hashtable_help(char * const *fields, int fields_cnt, void *client)
+{
+	cli_send(client, "pppoe show hashtable - show PPPoE myhashtable element counters\r\n");
+	cli_send(client, "  Checks declared num_elements against counted nodes for cookie_2_conn and mac_sessid_2_conn.\r\n");
+}
+
+static void show_obj_hashtable_line(void *client, const char *ifname, const char *table_name,
+					 obj_hash_table_t *table)
+{
+	myhashtable_stats_t st;
+	hashtable_rc_t rc;
+
+	rc = obj_hashtable_ts_get_stats(table, &st);
+	if (rc != HASH_TABLE_OK) {
+		cli_sendv(client, "%s %-22s error=%d\r\n", ifname ? ifname : "-", table_name, rc);
+		return;
+	}
+
+	cli_sendv(client,
+		"%-16s %-22s size=%-6lu declared=%-8u counted=%-8u used-buckets=%-6u max-chain=%-4u mismatch=%s\r\n",
+		ifname ? ifname : "-",
+		table_name,
+		(unsigned long)st.size,
+		st.declared_elements,
+		st.actual_elements,
+		st.used_buckets,
+		st.max_chain,
+		(st.declared_elements == st.actual_elements) ? "no" : "YES");
+}
+
+static void show_hash64_hashtable_line(void *client, const char *ifname, const char *table_name,
+					    hash64_table_t *table)
+{
+	myhashtable_stats_t st;
+	hashtable_rc_t rc;
+
+	rc = hashtable64_ts_get_stats(table, &st);
+	if (rc != HASH_TABLE_OK) {
+		cli_sendv(client, "%s %-22s error=%d\r\n", ifname ? ifname : "-", table_name, rc);
+		return;
+	}
+
+	cli_sendv(client,
+		"%-16s %-22s size=%-6lu declared=%-8u counted=%-8u used-buckets=%-6u max-chain=%-4u mismatch=%s\r\n",
+		ifname ? ifname : "-",
+		table_name,
+		(unsigned long)st.size,
+		st.declared_elements,
+		st.actual_elements,
+		st.used_buckets,
+		st.max_chain,
+		(st.declared_elements == st.actual_elements) ? "no" : "YES");
+}
+
+static int show_hashtable_exec(const char *cmd, char * const *fields, int fields_cnt, void *client)
+{
+	struct pppoe_serv_t *serv;
+	unsigned int total_conn_cnt = 0;
+	unsigned int total_cookie_declared = 0;
+	unsigned int total_cookie_counted = 0;
+	unsigned int total_mac_declared = 0;
+	unsigned int total_mac_counted = 0;
+
+	if (fields_cnt != 3)
+		goto help;
+
+	cli_send(client, "PPPoE myhashtable statistics:\r\n");
+	cli_send(client, "interface        table                  size   declared counted  used-buckets max-chain mismatch\r\n");
+	cli_send(client, "------------------------------------------------------------------------------------------------\r\n");
+
+	pthread_rwlock_rdlock(&serv_lock);
+	list_for_each_entry(serv, &serv_list, entry) {
+		myhashtable_stats_t cookie_st;
+		myhashtable_stats_t mac_st;
+
+		show_obj_hashtable_line(client, serv->ifname, "cookie_2_conn", &serv->cookie_2_conn);
+		show_hash64_hashtable_line(client, serv->ifname, "mac_sessid_2_conn", &serv->mac_sessid_2_conn);
+
+		if (obj_hashtable_ts_get_stats(&serv->cookie_2_conn, &cookie_st) == HASH_TABLE_OK) {
+			total_cookie_declared += cookie_st.declared_elements;
+			total_cookie_counted += cookie_st.actual_elements;
+		}
+		if (hashtable64_ts_get_stats(&serv->mac_sessid_2_conn, &mac_st) == HASH_TABLE_OK) {
+			total_mac_declared += mac_st.declared_elements;
+			total_mac_counted += mac_st.actual_elements;
+		}
+		total_conn_cnt += serv->conn_cnt;
+	}
+	pthread_rwlock_unlock(&serv_lock);
+
+	cli_send(client, "------------------------------------------------------------------------------------------------\r\n");
+	cli_sendv(client, "totals: conn_cnt=%u cookie_declared=%u cookie_counted=%u mac_declared=%u mac_counted=%u\r\n",
+		total_conn_cnt,
+		total_cookie_declared,
+		total_cookie_counted,
+		total_mac_declared,
+		total_mac_counted);
+
+	if (ptr_conf_interface_pado_delay) {
+		show_obj_hashtable_line(client, "global", "conf_interface_pado_delay", ptr_conf_interface_pado_delay);
+	}
+
+	return CLI_CMD_OK;
+
+help:
+	show_hashtable_help(fields, fields_cnt, client);
+	return CLI_CMD_OK;
+}
+
 static void init(void)
 {
 	cli_register_simple_cmd2(show_stat_exec, NULL, 2, "show", "stat");
@@ -520,6 +630,9 @@ static void init(void)
 	cli_register_simple_cmd2(add_intf_exec, add_intf_help, 3, "pppoe", "add", "interface");
 	cli_register_simple_cmd2(del_intf_exec, del_intf_help, 3, "pppoe", "del", "interface");
 	cli_register_simple_cmd2(show_intf_exec, show_intf_help, 3, "pppoe", "show", "interface");
+
+	cli_register_simple_cmd2(show_hashtable_exec, show_hashtable_help,
+				 3, "pppoe", "show", "hashtable");
 
 	cli_register_simple_cmd2(set_service_name_exec, set_service_name_help,
 				 3, "pppoe", "set", "service-name");

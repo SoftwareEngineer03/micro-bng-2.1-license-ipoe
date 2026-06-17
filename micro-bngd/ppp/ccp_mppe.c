@@ -290,8 +290,16 @@ static void mppe_print(void (*print)(const char *fmt,...),struct ccp_option_t *o
 static void ev_mppe_keys(struct ev_mppe_keys_t *ev)
 {
 	struct ppp_ccp_t *ccp = ccp_find_layer_data(ev->ppp);
-	struct mppe_option_t *mppe_opt = container_of(ccp_find_option(ev->ppp, &mppe_opt_hnd), typeof(*mppe_opt), opt);
+	struct ccp_option_t *opt = ccp_find_option(ev->ppp, &mppe_opt_hnd);
+	struct mppe_option_t *mppe_opt;
 	int mppe;
+
+	if (!ccp || !opt) {
+		log_ppp_error("mppe: CCP/MPPE option missing, ignoring key event\n");
+		return;
+	}
+
+	mppe_opt = container_of(opt, typeof(*mppe_opt), opt);
 
 	memcpy(mppe_opt->recv_key, ev->recv_key, 16);
 	memcpy(mppe_opt->send_key, ev->send_key, 16);

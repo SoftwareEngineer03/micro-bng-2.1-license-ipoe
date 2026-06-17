@@ -104,6 +104,17 @@ typedef struct
 	char *name;
 } hash64_table_t;
 
+
+typedef struct myhashtable_stats_s
+{
+  hash_size_t size;
+  uint32_t declared_elements;
+  uint32_t actual_elements;
+  uint32_t used_buckets;
+  uint32_t empty_buckets;
+  uint32_t max_chain;
+} myhashtable_stats_t;
+
 void hashtable_ts_init (hash_table_t * const hashtblP, const hash_size_t sizeP, u32 (*hashfuncP) (const u32), void (*freefuncP) (void **),
 	  char *tablename);
 hashtable_rc_t hashtable_ts_insert (hash_table_t * const hashtblP,
@@ -225,5 +236,13 @@ obj_hashtable_ts_nodes_unlock (
 hashtable_rc_t
 obj_hashtable_ts_destroy (
   obj_hash_table_t * const hashtblP);
+
+hashtable_rc_t obj_hashtable_ts_get_stats (
+  obj_hash_table_t * const hashtblP,
+  myhashtable_stats_t * const statsP);
+
+hashtable_rc_t hashtable64_ts_get_stats (
+  hash64_table_t * const hashtblP,
+  myhashtable_stats_t * const statsP);
 
 #endif /* _MYHASHTABLE_H_ */

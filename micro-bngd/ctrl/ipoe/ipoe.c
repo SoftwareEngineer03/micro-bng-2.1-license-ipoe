@@ -757,7 +757,12 @@ static void ipoe_session_start(struct ipoe_session *ses)
 
 	__sync_add_and_fetch(&stat_starting, 1);
 
-	assert(!ses->ses.username);
+	if (ses->ses.username) {
+		log_ppp_error("ipoe: session start called with existing username '%s', dropping duplicate start\n",
+		              ses->ses.username);
+		ipoe_session_finished(&ses->ses);
+		return;
+	}
 
 	username = ipoe_session_get_username(ses);
 

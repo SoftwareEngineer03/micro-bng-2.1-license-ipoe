@@ -245,8 +245,13 @@ int rad_req_acct_fill(struct rad_req_t *req)
 
 void rad_req_free(struct rad_req_t *req)
 {
-	assert(!req->active);
-	assert(!req->entry.next);
+	if (req->active || req->entry.next) {
+		log_ppp_error("radius:req_free: request %p is still %s%s; cancelling before free\n",
+		              req, req->active ? "active" : "",
+		              req->entry.next ? " queued" : "");
+		if (req->serv)
+			rad_server_req_cancel(req, 1);
+	}
 
 	if (req->serv)
 		rad_server_put(req->serv, req->type);

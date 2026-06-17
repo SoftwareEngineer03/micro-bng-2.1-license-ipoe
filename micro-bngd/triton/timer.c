@@ -54,9 +54,11 @@ int timer_init(void)
 
 void timer_run(void)
 {
-	if (pthread_create(&timer_thr, NULL, timer_thread, NULL)) {
-		triton_log_error("timer:pthread_create: %s",strerror(errno));
-		_exit(-1);
+	int err;
+
+	while ((err = pthread_create(&timer_thr, NULL, timer_thread, NULL))) {
+		triton_log_error("timer:pthread_create: %s; retrying", strerror(err));
+		sleep(1);
 	}
 }
 

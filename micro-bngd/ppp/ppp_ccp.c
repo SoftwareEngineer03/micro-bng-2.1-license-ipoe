@@ -758,24 +758,35 @@ int ccp_option_register(struct ccp_option_handler_t *h)
 
 struct ppp_ccp_t *ccp_find_layer_data(struct ppp_t *ppp)
 {
-	return container_of(ppp_find_layer_data(ppp, &ccp_layer), typeof(struct ppp_ccp_t), ld);
+	struct ppp_layer_data_t *ld = ppp_find_layer_data(ppp, &ccp_layer);
+	if (!ld) {
+		log_ppp_error("ccp: layer data not found\n");
+		return NULL;
+	}
+	return container_of(ld, typeof(struct ppp_ccp_t), ld);
 }
 struct ccp_option_t *ccp_find_option(struct ppp_t *ppp, struct ccp_option_handler_t *h)
 {
-	struct ppp_ccp_t *ccp = container_of(ppp_find_layer_data(ppp, &ccp_layer), typeof(*ccp), ld);
+	struct ppp_ccp_t *ccp = ccp_find_layer_data(ppp);
 	struct ccp_option_t *opt;
+
+	if (!ccp)
+		return NULL;
 
 	list_for_each_entry(opt, &ccp->options, entry)
 		if (opt->h == h)
 			return opt;
 
-	log_emerg("ccp: BUG: option not found\n");
-	abort();
+	log_ppp_error("ccp: option not found, ignoring recoverable option event\n");
+	return NULL;
 }
 
 int ccp_ipcp_started(struct ppp_t *ppp)
 {
-	struct ppp_ccp_t *ccp = container_of(ppp_find_layer_data(ppp, &ccp_layer), typeof(*ccp), ld);
+	struct ppp_ccp_t *ccp = ccp_find_layer_data(ppp);
+
+	if (!ccp)
+		return 0;
 
 	return !ccp->ld.passive && !ccp->started;
 }

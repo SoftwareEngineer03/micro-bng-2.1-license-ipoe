@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <vapi/vpe.api.vapi.h>
 
@@ -49,17 +50,18 @@ pthread_mutex_t vpp_api_acct_mutex;
 
 void __export vpp_api_connection()
 {
-  vapi_error_e rv = vapi_ctx_alloc (&ctx);
-  if( rv != VAPI_OK ) {
-    printf("vapi_ctx_alloc failed\n");
-		exit(1);
+  vapi_error_e rv;
+
+  while ((rv = vapi_ctx_alloc (&ctx)) != VAPI_OK) {
+    printf("vapi_ctx_alloc failed, retrying\n");
+    sleep(1);
   }
-  rv = vapi_connect_ex (ctx, "vbng", NULL, 64,
+
+  while ((rv = vapi_connect_ex (ctx, "vbng", NULL, 64,
 			32, VAPI_MODE_NONBLOCKING, true,
-			true);
-  if( rv != VAPI_OK ) {
-    printf("vapi_connect_ex failed\n");
-		exit(1);
+			true)) != VAPI_OK) {
+    printf("vapi_connect_ex failed, retrying\n");
+    sleep(1);
   }
 
   pthread_mutex_init(&vpp_api_mutex, NULL);
@@ -67,17 +69,18 @@ void __export vpp_api_connection()
 
 void __export vpp_api_connection_acct()
 {
-  vapi_error_e rv = vapi_ctx_alloc (&ctx_acct);
-  if( rv != VAPI_OK ) {
-    printf("vapi_ctx_alloc failed\n");
-		exit(1);
+  vapi_error_e rv;
+
+  while ((rv = vapi_ctx_alloc (&ctx_acct)) != VAPI_OK) {
+    printf("vapi_ctx_alloc acct failed, retrying\n");
+    sleep(1);
   }
-  rv = vapi_connect_ex (ctx_acct, "vbng_acct", NULL, 64,
+
+  while ((rv = vapi_connect_ex (ctx_acct, "vbng_acct", NULL, 64,
 			32, VAPI_MODE_NONBLOCKING, true,
-			true);
-  if( rv != VAPI_OK ) {
-    printf("vapi_connect_ex failed\n");
-		exit(1);
+			true)) != VAPI_OK) {
+    printf("vapi_connect_ex acct failed, retrying\n");
+    sleep(1);
   }
 
   pthread_mutex_init(&vpp_api_acct_mutex, NULL);

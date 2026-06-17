@@ -150,13 +150,19 @@ static void ev_dns(struct ev_dns_t *ev)
 	ppp = container_of(ev->ses, typeof(*ppp), ses);
 
 	if (ev->dns1) {
-		dns_opt = container_of(ipcp_find_option(ppp, &dns1_opt_hnd), typeof(*dns_opt), opt);
-		dns_opt->addr = ev->dns1;
+		struct ipcp_option_t *opt = ipcp_find_option(ppp, &dns1_opt_hnd);
+		if (opt) {
+			dns_opt = container_of(opt, typeof(*dns_opt), opt);
+			dns_opt->addr = ev->dns1;
+		}
 	}
 
 	if (ev->dns2) {
-		dns_opt = container_of(ipcp_find_option(ppp, &dns2_opt_hnd), typeof(*dns_opt), opt);
-		dns_opt->addr = ev->dns2;
+		struct ipcp_option_t *opt = ipcp_find_option(ppp, &dns2_opt_hnd);
+		if (opt) {
+			dns_opt = container_of(opt, typeof(*dns_opt), opt);
+			dns_opt->addr = ev->dns2;
+		}
 	}
 }
 

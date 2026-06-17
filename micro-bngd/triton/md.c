@@ -45,9 +45,11 @@ int md_init(void)
 }
 void md_run(void)
 {
-	if (pthread_create(&md_thr, NULL, md_thread, NULL)) {
-		triton_log_error("md:pthread_create: %s", strerror(errno));
-		_exit(-1);
+	int err;
+
+	while ((err = pthread_create(&md_thr, NULL, md_thread, NULL))) {
+		triton_log_error("md:pthread_create: %s; retrying", strerror(err));
+		sleep(1);
 	}
 }
 

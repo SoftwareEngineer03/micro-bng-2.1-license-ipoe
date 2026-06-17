@@ -305,13 +305,17 @@ int get_ipv6_dp_prefix_len()
   struct conf_option_t *opt;
 
   if(!s)
-    return 0;
+    return ipv6_dp_prefix_len;
   
   list_for_each_entry(opt, &s->items, entry) {
     if (!strcmp(opt->name, "delegate")) {
 
       char *val = _strdup(opt->val);
       char *ptr1, *ptr2;
+      if (!val) {
+        log_error("ipv6_pool(2): allocation failed while parsing delegate\n");
+        return ipv6_dp_prefix_len;
+      }
       int prefix_len;
 
       ptr1 = strchr(val, '/');
@@ -329,7 +333,7 @@ int get_ipv6_dp_prefix_len()
       if (sscanf(ptr2 + 1, "%i", &prefix_len) != 1)
       goto err;
 
-      if (prefix_len > 128)
+      if (prefix_len < 64 || prefix_len > 128)
       goto err;
 
       ipv6_dp_prefix_len = prefix_len;
@@ -402,8 +406,26 @@ int main(int _argc, char **_argv)
 	if (dump) {
 		len = (strlen(dump) / pagesize + 1) * pagesize;
 		conf_dump = memalign(pagesize, len);
+		if (!conf_dump) {
+			log_emerg("main: memalign for dump path failed\n");
+			return EXIT_FAILURE;
+		}
 		strcpy(conf_dump, dump);
 		mprotect(conf_dump, len, PROT_READ);
+	}
+
+	/* Install crash handlers before VPP setup, so startup crashes are captured too. */
+	if (!no_sigsegv) {
+		sigprocmask(0, NULL, &orig_set);
+		sigfillset(&set);
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = sigsegv;
+		sa.sa_mask = set;
+		sigaction(SIGSEGV, &sa, NULL);
+		sigaction(SIGABRT, &sa, NULL);
+		sigaction(SIGBUS, &sa, NULL);
+		sigaction(SIGILL, &sa, NULL);
+		sigaction(SIGFPE, &sa, NULL);
 	}
 
 	if (internal) {
@@ -460,6 +482,10 @@ int main(int _argc, char **_argv)
 
   sw_if_index_loop0 = vpp_api_get_iface_by_name("loop0");
   printf("loop0 sw_if_name: %u\n", sw_if_index_loop0);
+  if (sw_if_index_loop0 == (u32)~0) {
+    log_emerg("main: VPP interface loop0 not found\n");
+    return EXIT_FAILURE;
+  }
 
   u8 mask_down[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xff,0xff,0xff,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
   u8 mask_ipv6_down[32];
@@ -472,18 +498,27 @@ int main(int _argc, char **_argv)
 
   u32 sw_if_index = vpp_api_get_iface_by_name("WanEthernet1/0/0");
   printf("WanEthernet1/0/0 sw_if_name: %u\n", sw_if_index);
+  if (sw_if_index == (u32)~0) {
+    log_emerg("main: VPP interface WanEthernet1/0/0 not found\n");
+    return EXIT_FAILURE;
+  }
 
 /*  vpp_api_classify_add_del_table(1, 2, mask_down, sizeof(mask_down), 0, 0);
   vpp_api_classify_add_del_table(0, 1, mask_up, sizeof(mask_up), 1, 0);
   vpp_api_policer_classify_set_interface(sw_if_index, 0, 0);
   vpp_api_policer_classify_set_interface(sw_if_index, 1, 0);*/
 
+  if (ipv6_dp_prefix_len < 64 || ipv6_dp_prefix_len > 128) {
+    log_error("main: invalid ipv6 delegated prefix length %d, using /64\n", ipv6_dp_prefix_len);
+    ipv6_dp_prefix_len = 64;
+  }
+
   printf(" ## %d\n", ipv6_dp_prefix_len);
   if (ipv6_dp_prefix_len > 64) {
-    *(uint64_t *)(delegate6 + 8) = htobe64((*(uint64_t *)(delegate6+8)) & (0xFFFFFFFFFFFFFFFF << (128-ipv6_dp_prefix_len)));
+    *(uint64_t *)(delegate6 + 8) = htobe64((*(uint64_t *)(delegate6+8)) & (0xFFFFFFFFFFFFFFFFULL << (128-ipv6_dp_prefix_len)));
   } else {
     memset(delegate6+8, 0, 8);
-    *(uint64_t *)delegate6 = htobe64((*(uint64_t *)delegate6) & (0xFFFFFFFFFFFFFFFF << (64-ipv6_dp_prefix_len)));
+    *(uint64_t *)delegate6 = htobe64((*(uint64_t *)delegate6) & (0xFFFFFFFFFFFFFFFFULL << (64-ipv6_dp_prefix_len)));
   }
 
   for(int i=0; i<8; i++) {
@@ -494,10 +529,24 @@ int main(int _argc, char **_argv)
   memcpy(&mask_ipv6_down[6], delegate6, sizeof(delegate6));
 
   download_classify_table_index = vpp_api_classify_add_del_table(1, 2, mask_down, sizeof(mask_down), ~0, 1);
+  if (download_classify_table_index == (u32)~0) {
+    log_emerg("main: failed to create IPv4 download classify table\n");
+    return EXIT_FAILURE;
+  }
+
   ipv6_classify_table_index = vpp_api_classify_add_del_table(2, 2, mask_ipv6_down, sizeof(mask_ipv6_down), ~0, 1);
+  if (ipv6_classify_table_index == (u32)~0) {
+    log_emerg("main: failed to create IPv6 classify table\n");
+    return EXIT_FAILURE;
+  }
+
   vpp_api_policer_classify_set_interface(sw_if_index, download_classify_table_index, ipv6_classify_table_index, ~0, 1);
 
   upload_classify_table_index = vpp_api_classify_add_del_table(0, 1, mask_up, sizeof(mask_up), ~0, 1);
+  if (upload_classify_table_index == (u32)~0) {
+    log_emerg("main: failed to create upload classify table\n");
+    return EXIT_FAILURE;
+  }
 
 
 	triton_register_init(0, log_version);
@@ -520,12 +569,17 @@ int main(int _argc, char **_argv)
 		sa.sa_handler = sigsegv;
 		sa.sa_mask = set;
 		sigaction(SIGSEGV, &sa, NULL);
+		sigaction(SIGABRT, &sa, NULL);
+		sigaction(SIGBUS, &sa, NULL);
+		sigaction(SIGILL, &sa, NULL);
+		sigaction(SIGFPE, &sa, NULL);
 	}
 
 
 	sigdelset(&set, SIGKILL);
 	sigdelset(&set, SIGSTOP);
 	sigdelset(&set, SIGSEGV);
+	sigdelset(&set, SIGABRT);
 	sigdelset(&set, SIGFPE);
 	sigdelset(&set, SIGILL);
 	sigdelset(&set, SIGBUS);
