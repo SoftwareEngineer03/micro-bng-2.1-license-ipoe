@@ -364,6 +364,38 @@ void triton_context_release(struct _triton_context_t *ctx)
 		mempool_free(ctx);
 }
 
+/*
+ * External modules sometimes keep a struct triton_context_t pointer and call
+ * triton_context_wakeup()/call() later.  During PPPoE single-session=replace
+ * churn the waiting context can already be unregistered by the time an old
+ * session finishes and tries to wake it.  ud->tpd may then point to a freed
+ * _triton_context_t.  Never dereference ud->tpd until it has been validated
+ * against the live ctx_list, and hold a temporary reference while using it.
+ */
+static struct _triton_context_t *triton_context_get_live(struct triton_context_t *ud)
+{
+	struct _triton_context_t *ctx, *raw;
+
+	if (!ud)
+		ud = &default_ctx;
+
+	raw = (struct _triton_context_t *)ud->tpd;
+	if (!raw)
+		return NULL;
+
+	spin_lock(&ctx_list_lock);
+	list_for_each_entry(ctx, &ctx_list, entry) {
+		if (ctx == raw && ctx->ud == ud && !ctx->need_free) {
+			__sync_add_and_fetch(&ctx->refs, 1);
+			spin_unlock(&ctx_list_lock);
+			return ctx;
+		}
+	}
+	spin_unlock(&ctx_list_lock);
+
+	return NULL;
+}
+
 int __export triton_context_register(struct triton_context_t *ud, void *bf_arg)
 {
 	struct _triton_context_t *ctx;
@@ -404,7 +436,7 @@ int __export triton_context_register(struct triton_context_t *ud, void *bf_arg)
 	return 0;
 }
 
-void __export triton_context_unregister(struct triton_context_t *ud)
+int __export triton_context_unregister(struct triton_context_t *ud)
 {
 	struct _triton_context_t *ctx;
 	struct _triton_ctx_call_t *call;
@@ -412,7 +444,7 @@ void __export triton_context_unregister(struct triton_context_t *ud)
 
 	if (!ud || !ud->tpd) {
 		triton_log_error("triton: context_unregister: context is not registered");
-		return;
+		return -1;
 	}
 
 	ctx = (struct _triton_context_t *)ud->tpd;
@@ -425,23 +457,23 @@ void __export triton_context_unregister(struct triton_context_t *ud)
 	}
 
 	if (!list_empty(&ctx->handlers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: handlers is not empty; keeping context to avoid service abort");
-		return;
+		triton_log_error("BUG:ctx:triton_unregister_ctx: handlers is not empty; unregister deferred");
+		return -1;
 	}
 
 	if (!list_empty(&ctx->pending_handlers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_handlers is not empty; keeping context to avoid service abort");
-		return;
+		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_handlers is not empty; unregister deferred");
+		return -1;
 	}
 
 	if (!list_empty(&ctx->timers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: timers is not empty; keeping context to avoid service abort");
-		return;
+		triton_log_error("BUG:ctx:triton_unregister_ctx: timers is not empty; unregister deferred");
+		return -1;
 	}
 
 	if (!list_empty(&ctx->pending_timers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_timers is not empty; keeping context to avoid service abort");
-		return;
+		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_timers is not empty; unregister deferred");
+		return -1;
 	}
 
 	ctx->need_free = 1;
@@ -461,6 +493,8 @@ void __export triton_context_unregister(struct triton_context_t *ud)
 			triton_thread_wakeup(t);
 		spin_unlock(&threads_lock);
 	}
+
+	return 0;
 }
 
 void __export triton_context_set_priority(struct triton_context_t *ud, int prio)
@@ -563,14 +597,15 @@ void __export triton_context_schedule()
 void __export triton_context_wakeup(struct triton_context_t *ud)
 {
 	struct _triton_context_t *ctx;
+	struct _triton_thread_t *thread = NULL;
 	int r = 0;
 
-	if (!ud || !ud->tpd) {
-		triton_log_error("triton: context_wakeup: context is not registered");
+	ctx = triton_context_get_live(ud);
+	if (!ctx) {
+		triton_log_error("triton: context_wakeup: context is not registered or already freed");
 		return;
 	}
 
-	ctx = (struct _triton_context_t *)ud->tpd;
 	log_debug2("ctx %p: wakeup\n", ctx);
 
 	if (ctx->init) {
@@ -579,6 +614,8 @@ void __export triton_context_wakeup(struct triton_context_t *ud)
 		ctx->init = 0;
 		if (ctx->pending)
 			r = triton_queue_ctx(ctx);
+		if (r)
+			thread = ctx->thread;
 		spin_unlock(&ctx->lock);
 	} else {
 		spin_lock(&threads_lock);
@@ -606,6 +643,8 @@ void __export triton_context_wakeup(struct triton_context_t *ud)
 				} else {
 					list_add_tail(&ctx->entry2, &ctx->thread->wakeup_list[ctx->priority]);
 					r = ctx->thread->ctx == NULL;
+					if (r)
+						thread = ctx->thread;
 				}
 			}
 		}
@@ -613,12 +652,15 @@ void __export triton_context_wakeup(struct triton_context_t *ud)
 	}
 
 	if (r)
-		triton_thread_wakeup(ctx->thread);
+		triton_thread_wakeup(thread);
+
+	triton_context_release(ctx);
 }
 
 int __export triton_context_call(struct triton_context_t *ud, void (*func)(void *), void *arg)
 {
-	struct _triton_context_t *ctx = ud ? (struct _triton_context_t *)ud->tpd : (struct _triton_context_t *)default_ctx.tpd;
+	struct _triton_context_t *ctx;
+	struct _triton_thread_t *thread = NULL;
 	struct _triton_ctx_call_t *call;
 	int r;
 
@@ -627,14 +669,17 @@ int __export triton_context_call(struct triton_context_t *ud, void (*func)(void 
 		return -1;
 	}
 
+	ctx = triton_context_get_live(ud);
 	if (!ctx) {
-		triton_log_error("triton: context_call: context is not registered");
+		triton_log_error("triton: context_call: context is not registered or already freed");
 		return -1;
 	}
 
 	call = mempool_alloc(call_pool);
-	if (!call)
+	if (!call) {
+		triton_context_release(ctx);
 		return -1;
+	}
 
 	call->func = func;
 	call->arg = arg;
@@ -642,25 +687,30 @@ int __export triton_context_call(struct triton_context_t *ud, void (*func)(void 
 	spin_lock(&ctx->lock);
 	list_add_tail(&call->entry, &ctx->pending_calls);
 	r = triton_queue_ctx(ctx);
+	if (r)
+		thread = ctx->thread;
 	spin_unlock(&ctx->lock);
 
 	if (r)
-		triton_thread_wakeup(ctx->thread);
+		triton_thread_wakeup(thread);
+
+	triton_context_release(ctx);
 
 	return 0;
 }
 
 void __export triton_cancel_call(struct triton_context_t *ud, void (*func)(void *))
 {
-	struct _triton_context_t *ctx = ud ? (struct _triton_context_t *)ud->tpd : (struct _triton_context_t *)default_ctx.tpd;
+	struct _triton_context_t *ctx;
 	struct list_head *pos, *n;
-
-	if (!ctx) {
-		triton_log_error("triton: cancel_call: context is not registered");
-		return;
-	}
 	struct _triton_ctx_call_t *call;
 	LIST_HEAD(rem_calls);
+
+	ctx = triton_context_get_live(ud);
+	if (!ctx) {
+		triton_log_error("triton: cancel_call: context is not registered or already freed");
+		return;
+	}
 
 	spin_lock(&ctx->lock);
 	list_for_each_safe(pos, n, &ctx->pending_calls) {
@@ -675,6 +725,8 @@ void __export triton_cancel_call(struct triton_context_t *ud, void (*func)(void 
 		list_del(&call->entry);
 		mempool_free(call);
 	}
+
+	triton_context_release(ctx);
 }
 
 void __export triton_collect_cpu_usage(void)

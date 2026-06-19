@@ -286,6 +286,14 @@ static void destablish_ppp(struct ppp_t *ppp)
 {
 	struct pppunit_cache *uc = NULL;
 
+	if (!ppp)
+		return;
+
+	if (ppp->ses.finish_started || ppp->ses.terminated) {
+		log_ppp_debug("ppp destablish requested after session finish started, ignoring duplicate request\n");
+		return;
+	}
+
   if(ppp->ses.ipv6_started) {
     struct ipv6db_addr_t *a;
     if (ppp->ses.ipv6 && !list_empty(&ppp->ses.ipv6->addr_list)) {
@@ -879,6 +887,9 @@ void __export ppp_layer_passive(struct ppp_t *ppp, struct ppp_layer_data_t *d)
 
 void __export ppp_layer_finished(struct ppp_t *ppp, struct ppp_layer_data_t *d)
 {
+	if (!ppp || ppp->ses.finish_started || ppp->ses.terminated)
+		return;
+
 	struct layer_node_t *n = d->node;
 
 	d->finished = 1;
@@ -896,6 +907,9 @@ void __export ppp_layer_finished(struct ppp_t *ppp, struct ppp_layer_data_t *d)
 
 int __export ppp_terminate(struct ap_session *ses, int hard)
 {
+	if (!ses || ses->finish_started || ses->terminated)
+		return 0;
+
 	struct ppp_t *ppp = container_of(ses, typeof(*ppp), ses);
 	struct layer_node_t *n;
 	struct ppp_layer_data_t *d;

@@ -117,6 +117,11 @@ struct ap_session
 	unsigned int terminating:1;
 	unsigned int terminated:1;
 	unsigned int down:1;
+	/* Set atomically when ap_session_finished() starts.  This makes
+	 * final session teardown idempotent under PPPoE reconnect/session-replace
+	 * churn and prevents a second terminate path from touching already
+	 * returned session resources. */
+	int finish_started;
 	int terminate_cause;
 
 	struct list_head pd_list;

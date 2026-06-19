@@ -950,6 +950,10 @@ pppoe_session_accounting_cb (vapi_ctx_t ctx, void *caller_ctx,
 				vapi_payload_pppoe_session_accounting_reply * p)
 {
 	test_pppoe_session_accounting_ctx_t *clc = caller_ctx;
+
+	if (!clc || !p)
+		return VAPI_OK;
+
 	++clc->called;
 	clc->acct_input_octets = p->acct_input_octets;
 	clc->acct_output_octets = p->acct_output_octets;
@@ -965,46 +969,48 @@ pppoe_session_accounting_cb (vapi_ctx_t ctx, void *caller_ctx,
 
 void __export vpp_api_pppoe_session_accounting(u8 *mac_address, u32 ip_address, pppoe_session_accounting_t *accounting, u8 is_ipoe)
 {
+	test_pppoe_session_accounting_ctx_t clcs;
+	vapi_msg_pppoe_session_accounting *cl;
+	vapi_error_e rv;
+	int j;
+
+	if (accounting)
+		clib_memset(accounting, 0, sizeof(*accounting));
+
+	if (!accounting || !mac_address)
+		return;
+
 	pthread_mutex_lock(&vpp_api_acct_mutex);
 
-	//printf ("--- Get pppoe session accounting using nonblocking API ---\n");
-
-	u32 retval;
-	clib_memset (&retval, 0xff, sizeof (retval));
-	test_pppoe_session_accounting_ctx_t clcs;
-	clib_memset (&clcs, 0, sizeof (clcs));
-	
-	vapi_msg_pppoe_session_accounting *cl = vapi_alloc_pppoe_session_accounting (ctx_acct);
-
-	int j;
-	for (j = 0; j < 6; ++j)
-	{
-		cl->payload.client_mac[j] = mac_address[j];
+	if (!ctx_acct) {
+		pthread_mutex_unlock(&vpp_api_acct_mutex);
+		return;
 	}
 
-    cl->payload.client_ip.af = ADDRESS_IP4;
+	clib_memset(&clcs, 0, sizeof(clcs));
+	cl = vapi_alloc_pppoe_session_accounting(ctx_acct);
+	if (!cl) {
+		pthread_mutex_unlock(&vpp_api_acct_mutex);
+		return;
+	}
 
-	cl->payload.client_ip.un.ip4[0] = ( ip_address ) & 0xFF;
-	cl->payload.client_ip.un.ip4[1] = ( ip_address >> 8 ) & 0xFF;
-	cl->payload.client_ip.un.ip4[2] = ( ip_address >> 16 ) & 0xFF;
-	cl->payload.client_ip.un.ip4[3] = ( ip_address >> 24 ) & 0xFF;
+	for (j = 0; j < 6; ++j)
+		cl->payload.client_mac[j] = mac_address[j];
 
-    cl->payload.is_ipoe = is_ipoe;
+	cl->payload.client_ip.af = ADDRESS_IP4;
+	cl->payload.client_ip.un.ip4[0] = ip_address & 0xFF;
+	cl->payload.client_ip.un.ip4[1] = (ip_address >> 8) & 0xFF;
+	cl->payload.client_ip.un.ip4[2] = (ip_address >> 16) & 0xFF;
+	cl->payload.client_ip.un.ip4[3] = (ip_address >> 24) & 0xFF;
+	cl->payload.is_ipoe = is_ipoe;
 
-	/*printf ("(1) Get pppoe session accounting client_ip %u.%u.%u.%u\n",
-		cl->payload.client_ip.un.ip4[0], cl->payload.client_ip.un.ip4[1], 
-		cl->payload.client_ip.un.ip4[2], cl->payload.client_ip.un.ip4[3]
-	);*/
+	while (VAPI_EAGAIN == (rv = vapi_pppoe_session_accounting(ctx_acct, cl, pppoe_session_accounting_cb, &clcs)))
+		;
 
-	vapi_error_e rv;
-	while (VAPI_EAGAIN == (rv = vapi_pppoe_session_accounting (ctx_acct, cl, pppoe_session_accounting_cb, &clcs)));
-	while (VAPI_EAGAIN == (rv = vapi_dispatch (ctx_acct)))
-    ;
-    
-	/*printf ("(2) accouting %u %u %u %u - %u %u %u %u\n",
-		clcs.acct_input_octets, clcs.acct_output_octets, clcs.acct_input_packets, clcs.acct_output_packets,
-		clcs.acct_input_octets_ipv6, clcs.acct_output_octets_ipv6, clcs.acct_input_packets_ipv6, clcs.acct_output_packets_ipv6
-	);*/
+	if (rv == VAPI_OK) {
+		while (VAPI_EAGAIN == (rv = vapi_dispatch(ctx_acct)))
+			;
+	}
 
 	accounting->acct_input_octets = clcs.acct_input_octets;
 	accounting->acct_output_octets = clcs.acct_output_octets;

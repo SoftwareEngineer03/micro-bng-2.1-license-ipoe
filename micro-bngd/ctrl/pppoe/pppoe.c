@@ -241,6 +241,11 @@ static void disconnect(struct pppoe_conn_t *conn)
 	sid_map[conn->sid/(8*sizeof(long))] |= 1 << (conn->sid % (8*sizeof(long)));
 	pthread_mutex_unlock(&sid_lock);
 
+	if (triton_context_unregister(&conn->ctx)) {
+		log_ppp_warn("pppoe: context unregister deferred for sid=%u; keeping connection memory to avoid use-after-free\n", conn->sid);
+		return;
+	}
+
 	_free(conn->ctrl.service_name);
 	_free(conn->ctrl.calling_station_id);
 	_free(conn->ctrl.called_station_id);
@@ -251,8 +256,6 @@ static void disconnect(struct pppoe_conn_t *conn)
 		_free(conn->relay_sid);
 	if (conn->tr101)
 		_free(conn->tr101);
-
-	triton_context_unregister(&conn->ctx);
 
 	mempool_free(conn);
 }

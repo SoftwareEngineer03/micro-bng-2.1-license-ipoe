@@ -219,6 +219,18 @@ void __export ap_session_activate(struct ap_session *ses)
 
 void __export ap_session_finished(struct ap_session *ses)
 {
+	if (!ses)
+		return;
+
+	/* ap_session_finished() may be reached from more than one teardown path
+	 * (layer-finished, forced PPP terminate, PADT/replace, timer).  Only the
+	 * first caller is allowed to release IPDB items, unlink the session and
+	 * free per-session strings. */
+	if (__sync_lock_test_and_set(&ses->finish_started, 1)) {
+		log_ppp_debug("session finish already in progress, ignoring duplicate finish\n");
+		return;
+	}
+
 	ses->terminated = 1;
 
 	if (!ses->down) {
@@ -261,8 +273,11 @@ void __export ap_session_finished(struct ap_session *ses)
 	triton_event_fire(EV_SES_FINISHED, ses);
 	ses->ctrl->finished(ses);
 
-	if (ses->wakeup)
-		triton_context_wakeup(ses->wakeup);
+	if (ses->wakeup) {
+		struct triton_context_t *wakeup = ses->wakeup;
+		ses->wakeup = NULL;
+		triton_context_wakeup(wakeup);
+	}
 
 	if (ses->username) {
 		_free(ses->username);
@@ -315,8 +330,13 @@ void __export ap_session_finished(struct ap_session *ses)
 
 void __export ap_session_terminate(struct ap_session *ses, int cause, int hard)
 {
-	if (ses->terminated)
+	if (!ses || ses->terminated || ses->finish_started)
 		return;
+
+	if (!ses->ctrl || !ses->ctrl->ctx || !ses->ctrl->terminate) {
+		log_ppp_warn("terminate requested for session with incomplete ctrl state\n");
+		return;
+	}
 
 	triton_context_set_priority(ses->ctrl->ctx, 3);
 
@@ -330,10 +350,13 @@ void __export ap_session_terminate(struct ap_session *ses, int cause, int hard)
 		triton_timer_del(&ses->timer);
 
 	if (ses->terminating) {
-		if (hard)
+		/* A second soft terminate while the session is already FINISHING used
+		 * to force ctrl->terminate(..., hard=1).  Under PPPoE churn this can
+		 * re-enter destablish_ppp()/ap_session_finished() while layer teardown
+		 * is still in flight, producing stale ipv4/session pointers.  Only an
+		 * explicit hard terminate is allowed to force the lower layer again. */
+		if (hard && !ses->finish_started)
 			ses->ctrl->terminate(ses, hard);
-		else if (ses->state == AP_STATE_FINISHING)
-			ses->ctrl->terminate(ses, 1);
 		return;
 	}
 
@@ -428,20 +451,35 @@ static void generate_sessionid(struct ap_session *ses)
 int __export ap_session_read_stats(struct ap_session *ses, struct rtnl_link_stats64 *stats)
 {
 	struct rtnl_link_stats64 lstats;
-
-	//if (ses->ifindex == -1)
-	//	return -1;
+	pppoe_session_accounting_t accounting;
+	u8 mac[ETH_ALEN];
+	u32 peer_addr = 0;
 
 	if (!stats)
 		stats = &lstats;
 
-	/*if (iplink_get_stats(ses->ifindex, stats)) {
-		log_ppp_warn("failed to get interface statistics\n");
-		return -1;
-	}*/
+	memset(stats, 0, sizeof(*stats));
+	memset(&accounting, 0, sizeof(accounting));
+	memset(mac, 0, sizeof(mac));
 
-  pppoe_session_accounting_t accounting;
-	vpp_api_pppoe_session_accounting(ses->ppp_info.addr, ses->ipv4? ses->ipv4->peer_addr:0, &accounting, ses->is_ipoe);
+	if (!ses)
+		return -1;
+
+	/*
+	 * During disconnect/session-replace churn the IPv4 pool item may already be
+	 * going away while final accounting is being collected.  Prefer the cached
+	 * client IP saved when the VPP session was installed; only fall back to the
+	 * live IPv4 pointer for sessions that have not populated clientip yet.
+	 */
+	peer_addr = ses->clientip;
+	/* During teardown avoid dereferencing ses->ipv4 as it may already be
+	 * owned by an in-flight finish path.  clientip is the stable cached value
+	 * populated when the VPP PPPoE session is installed. */
+	if (!peer_addr && !ses->terminating && !ses->terminated && !ses->finish_started && ses->ipv4)
+		peer_addr = ses->ipv4->peer_addr;
+
+	memcpy(mac, ses->ppp_info.addr, sizeof(mac));
+	vpp_api_pppoe_session_accounting(mac, peer_addr, &accounting, ses->is_ipoe);
 
 	stats->rx_packets = accounting.acct_input_packets + accounting.acct_input_packets_ipv6;
 	stats->tx_packets = accounting.acct_output_packets + accounting.acct_output_packets_ipv6;
@@ -479,7 +517,11 @@ int __export ap_session_set_username(struct ap_session *s, char *username)
 					_free(username);
 					return -1;
 				} else {
-					if (!ses->wakeup) {
+					/* Arm only one old session to wake the new session.
+					 * Multiple old duplicates can finish at different times; storing
+					 * the same new context in all of them may later wake a stale/freed
+					 * context after the first finish has already resumed it. */
+					if (!wait && !ses->wakeup) {
 						ses->wakeup = s->ctrl->ctx;
 						wait = 1;
 					}
