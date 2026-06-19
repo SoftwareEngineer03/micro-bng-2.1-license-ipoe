@@ -40,6 +40,14 @@ int md_init(void)
 	}
 
 	md_pool = mempool_create(sizeof(struct _triton_md_handler_t));
+	if (!md_pool) {
+		triton_log_error("md:mempool_create failed");
+		free(epoll_events);
+		epoll_events = NULL;
+		close(epoll_fd);
+		epoll_fd = -1;
+		return -1;
+	}
 
 	return 0;
 }
@@ -76,12 +84,13 @@ static void *md_thread(void *arg)
 			if (errno == EINTR)
 				continue;
 			triton_log_error("md:epoll_wait: %s", strerror(errno));
-			_exit(-1);
+			sleep(1);
+			continue;
 		}
 
 		for(i = 0; i < n; i++) {
 			h = (struct _triton_md_handler_t *)epoll_events[i].data.ptr;
-			if (!h->ud)
+			if (!h || !h->ctx || !h->ud)
 				continue;
 			spin_lock(&h->ctx->lock);
 			if (h->ud) {
@@ -117,7 +126,20 @@ static void *md_thread(void *arg)
 
 void __export triton_md_register_handler(struct triton_context_t *ctx, struct triton_md_handler_t *ud)
 {
-	struct _triton_md_handler_t *h = mempool_alloc(md_pool);
+	struct _triton_md_handler_t *h;
+
+	if (!ud) {
+		triton_log_error("md:register_handler: NULL handler");
+		return;
+	}
+
+	h = mempool_alloc(md_pool);
+	if (!h) {
+		triton_log_error("md:register_handler: out of memory");
+		ud->tpd = NULL;
+		return;
+	}
+
 	memset(h, 0, sizeof(*h));
 	h->ud = ud;
 	h->epoll_event.data.ptr = h;
@@ -125,6 +147,14 @@ void __export triton_md_register_handler(struct triton_context_t *ctx, struct tr
 		h->ctx = (struct _triton_context_t *)ctx->tpd;
 	else
 		h->ctx = (struct _triton_context_t *)default_ctx.tpd;
+
+	if (!h->ctx) {
+		triton_log_error("md:register_handler: context is not registered");
+		mempool_free(h);
+		ud->tpd = NULL;
+		return;
+	}
+
 	__sync_add_and_fetch(&h->ctx->refs, 1);
 	ud->tpd = h;
 	spin_lock(&h->ctx->lock);
@@ -136,7 +166,20 @@ void __export triton_md_register_handler(struct triton_context_t *ctx, struct tr
 
 void __export triton_md_unregister_handler(struct triton_md_handler_t *ud, int c)
 {
-	struct _triton_md_handler_t *h = (struct _triton_md_handler_t *)ud->tpd;
+	struct _triton_md_handler_t *h;
+
+	if (!ud || !ud->tpd) {
+		triton_log_error("md:unregister_handler: handler is not registered");
+		return;
+	}
+
+	h = (struct _triton_md_handler_t *)ud->tpd;
+	if (!h->ctx) {
+		triton_log_error("md:unregister_handler: handler context is NULL");
+		ud->tpd = NULL;
+		mempool_free(h);
+		return;
+	}
 
 	triton_md_disable_handler(ud, MD_MODE_READ | MD_MODE_WRITE);
 
@@ -165,9 +208,22 @@ void __export triton_md_unregister_handler(struct triton_md_handler_t *ud, int c
 
 int __export triton_md_enable_handler(struct triton_md_handler_t *ud, int mode)
 {
-	struct _triton_md_handler_t *h = (struct _triton_md_handler_t *)ud->tpd;
+	struct _triton_md_handler_t *h;
 	int r;
-	int events = h->epoll_event.events;
+	int events;
+
+	if (!ud || !ud->tpd) {
+		triton_log_error("md:enable_handler: handler is not registered");
+		return -1;
+	}
+
+	h = (struct _triton_md_handler_t *)ud->tpd;
+	if (!h->ud || !h->ctx || ud->fd < 0) {
+		triton_log_error("md:enable_handler: invalid handler state");
+		return -1;
+	}
+
+	events = h->epoll_event.events;
 
 	if (mode & MD_MODE_READ)
 		h->epoll_event.events |= EPOLLIN;
@@ -193,8 +249,8 @@ int __export triton_md_enable_handler(struct triton_md_handler_t *ud, int mode)
 		r = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, h->ud->fd, &h->epoll_event);
 
 	if (r) {
-		triton_log_error("md:epoll_ctl: %s",strerror(errno));
-		abort();
+		triton_log_error("md:enable_handler: epoll_ctl: %s", strerror(errno));
+		return -1;
 	}
 
 	return r;
@@ -202,9 +258,18 @@ int __export triton_md_enable_handler(struct triton_md_handler_t *ud, int mode)
 
 int __export triton_md_disable_handler(struct triton_md_handler_t *ud,int mode)
 {
-	struct _triton_md_handler_t *h = (struct _triton_md_handler_t *)ud->tpd;
+	struct _triton_md_handler_t *h;
 	int r = 0;
-	int events = h->epoll_event.events;
+	int events;
+
+	if (!ud || !ud->tpd)
+		return 0;
+
+	h = (struct _triton_md_handler_t *)ud->tpd;
+	if (!h->ud || !h->ctx)
+		return 0;
+
+	events = h->epoll_event.events;
 
 	if (!h->epoll_event.events)
 		return 0;
@@ -233,8 +298,8 @@ int __export triton_md_disable_handler(struct triton_md_handler_t *ud,int mode)
 	}
 
 	if (r) {
-		triton_log_error("md:epoll_ctl: %s",strerror(errno));
-		abort();
+		triton_log_error("md:disable_handler: epoll_ctl: %s", strerror(errno));
+		return -1;
 	}
 
 	return r;
@@ -242,14 +307,25 @@ int __export triton_md_disable_handler(struct triton_md_handler_t *ud,int mode)
 
 void __export triton_md_set_trig(struct triton_md_handler_t *ud, int mode)
 {
-	struct _triton_md_handler_t *h = (struct _triton_md_handler_t *)ud->tpd;
+	struct _triton_md_handler_t *h;
+
+	if (!ud || !ud->tpd)
+		return;
+
+	h = (struct _triton_md_handler_t *)ud->tpd;
 	h->trig_level = mode;
 }
 
 void md_rearm(struct _triton_md_handler_t *h)
 {
+	if (!h || !h->ud)
+		return;
+
 	if (h->mod) {
-		epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h->ud->fd, &h->epoll_event);
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, h->ud->fd, &h->epoll_event)) {
+			triton_log_error("md:rearm: epoll_ctl: %s", strerror(errno));
+			return;
+		}
 		h->mod = 0;
 	}
 

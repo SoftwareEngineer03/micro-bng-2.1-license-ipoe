@@ -65,6 +65,11 @@ mempool_t __export *mempool_create(int size)
 {
 	struct _mempool_t *p = _malloc(sizeof(*p));
 
+	if (!p) {
+		triton_log_error("mempool: cannot create pool");
+		return NULL;
+	}
+
 	memset(p, 0, sizeof(*p));
 	INIT_LIST_HEAD(&p->items);
 #ifdef MEMDEBUG
@@ -85,6 +90,9 @@ mempool_t __export *mempool_create2(int size)
 {
 	struct _mempool_t *p = (struct _mempool_t *)mempool_create(size);
 
+	if (!p)
+		return NULL;
+
 	p->mmap = 1;
 
 	return (mempool_t *)p;
@@ -94,6 +102,11 @@ mempool_t __export *mempool_create2(int size)
 void __export *mempool_alloc(mempool_t *pool)
 {
 	struct _mempool_t *p = (struct _mempool_t *)pool;
+
+	if (!p) {
+		triton_log_error("mempool: allocation from NULL pool");
+		return NULL;
+	}
 	struct _item_t *it;
 	uint32_t size = sizeof(*it) + p->size + 8;
 
@@ -138,7 +151,12 @@ void __export *mempool_alloc(mempool_t *pool)
 
 void __export mempool_free(void *ptr)
 {
-	struct _item_t *it = container_of(ptr, typeof(*it), ptr);
+	struct _item_t *it;
+
+	if (!ptr)
+		return;
+
+	it = container_of(ptr, typeof(*it), ptr);
 	struct _mempool_t *p = it->owner;
 	uint32_t size = sizeof(*it) + it->owner->size + 8;
 	int need_free = 0;

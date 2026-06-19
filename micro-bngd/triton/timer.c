@@ -48,6 +48,14 @@ int timer_init(void)
 	}
 
 	timer_pool = mempool_create(sizeof(struct _triton_timer_t));
+	if (!timer_pool) {
+		triton_log_error("timer:mempool_create failed");
+		_free(epoll_events);
+		epoll_events = NULL;
+		close(epoll_fd);
+		epoll_fd = -1;
+		return -1;
+	}
 
 	return 0;
 }
@@ -85,12 +93,13 @@ void *timer_thread(void *arg)
 			if (errno == EINTR)
 				continue;
 			triton_log_error("timer:epoll_wait: %s", strerror(errno));
-			_exit(-1);
+			sleep(1);
+			continue;
 		}
 
 		for(i = 0; i < n; i++) {
 			t = (struct _triton_timer_t *)epoll_events[i].data.ptr;
-			if (!t->ud)
+			if (!t || !t->ctx || !t->ud)
 				continue;
 			spin_lock(&t->ctx->lock);
 			if (t->ud) {
@@ -128,7 +137,19 @@ void *timer_thread(void *arg)
 
 int __export triton_timer_add(struct triton_context_t *ctx, struct triton_timer_t *ud, int abs_time)
 {
-	struct _triton_timer_t *t = mempool_alloc(timer_pool);
+	struct _triton_timer_t *t;
+
+	if (!ud) {
+		triton_log_error("timer:add: NULL timer");
+		return -1;
+	}
+
+	t = mempool_alloc(timer_pool);
+	if (!t) {
+		triton_log_error("timer:add: out of memory");
+		ud->tpd = NULL;
+		return -1;
+	}
 
 	memset(t, 0, sizeof(*t));
 	t->ud = ud;
@@ -138,6 +159,13 @@ int __export triton_timer_add(struct triton_context_t *ctx, struct triton_timer_
 		t->ctx = (struct _triton_context_t *)ctx->tpd;
 	else
 		t->ctx = (struct _triton_context_t *)default_ctx.tpd;
+
+	if (!t->ctx) {
+		triton_log_error("timer:add: context is not registered");
+		mempool_free(t);
+		ud->tpd = NULL;
+		return -1;
+	}
 	t->fd = timerfd_create(abs_time ? CLOCK_REALTIME : CLOCK_MONOTONIC, 0);
 	if (t->fd < 0) {
 		triton_log_error("timer:timerfd_create: %s", strerror(errno));
@@ -181,13 +209,20 @@ out_err:
 }
 int __export triton_timer_mod(struct triton_timer_t *ud,int abs_time)
 {
-	struct _triton_timer_t *t = (struct _triton_timer_t *)ud->tpd;
-	struct itimerspec ts =	{
-		.it_value.tv_sec = ud->expire_tv.tv_sec,
-		.it_value.tv_nsec = ud->expire_tv.tv_usec * 1000,
-		.it_interval.tv_sec = ud->period / 1000,
-		.it_interval.tv_nsec = (ud->period % 1000) * 1000,
-	};
+	struct _triton_timer_t *t;
+	struct itimerspec ts;
+
+	if (!ud || !ud->tpd) {
+		triton_log_error("timer:mod: timer is not registered");
+		return -1;
+	}
+
+	t = (struct _triton_timer_t *)ud->tpd;
+	memset(&ts, 0, sizeof(ts));
+	ts.it_value.tv_sec = ud->expire_tv.tv_sec;
+	ts.it_value.tv_nsec = ud->expire_tv.tv_usec * 1000;
+	ts.it_interval.tv_sec = ud->period / 1000;
+	ts.it_interval.tv_nsec = (ud->period % 1000) * 1000;
 
 	if (ud->expire_tv.tv_sec == 0 && ud->expire_tv.tv_usec == 0)
 		ts.it_value = ts.it_interval;
@@ -201,8 +236,8 @@ int __export triton_timer_mod(struct triton_timer_t *ud,int abs_time)
 }
 void __export triton_timer_del(struct triton_timer_t *ud)
 {
-  if(!ud->tpd) {
-    triton_log_error("tpd is not set");
+  if(!ud || !ud->tpd) {
+    triton_log_error("timer:del: timer is not registered");
     return;
   }
   

@@ -59,6 +59,10 @@ static __thread void *thread_frame;
 
 void triton_thread_wakeup(struct _triton_thread_t *thread)
 {
+	if (!thread) {
+		triton_log_error("triton: wakeup requested for NULL thread");
+		return;
+	}
 	log_debug2("wake up thread %p\n", thread);
 	pthread_kill(thread->thread, SIGUSR1);
 }
@@ -336,8 +340,8 @@ int triton_queue_ctx(struct _triton_context_t *ctx)
 
 	if (list_empty(&sleep_threads) || need_config_reload) {
 		list_add_tail(&ctx->entry2, &ctx_queue[ctx->priority]);
-		spin_unlock(&threads_lock);
 		ctx->queued = 1;
+		spin_unlock(&threads_lock);
 		log_debug2("ctx %p: queued\n", ctx);
 		__sync_add_and_fetch(&triton_stat.context_pending, 1);
 		return 0;
@@ -354,13 +358,22 @@ int triton_queue_ctx(struct _triton_context_t *ctx)
 
 void triton_context_release(struct _triton_context_t *ctx)
 {
+	if (!ctx)
+		return;
 	if (__sync_sub_and_fetch(&ctx->refs, 1) == 0)
 		mempool_free(ctx);
 }
 
 int __export triton_context_register(struct triton_context_t *ud, void *bf_arg)
 {
-	struct _triton_context_t *ctx = mempool_alloc(ctx_pool);
+	struct _triton_context_t *ctx;
+
+	if (!ud) {
+		triton_log_error("triton: context_register: NULL context");
+		return -1;
+	}
+
+	ctx = mempool_alloc(ctx_pool);
 
 	log_debug2("ctx %p: register\n", ctx);
 	if (!ctx)
@@ -393,10 +406,16 @@ int __export triton_context_register(struct triton_context_t *ud, void *bf_arg)
 
 void __export triton_context_unregister(struct triton_context_t *ud)
 {
-	struct _triton_context_t *ctx = (struct _triton_context_t *)ud->tpd;
+	struct _triton_context_t *ctx;
 	struct _triton_ctx_call_t *call;
 	struct _triton_thread_t *t;
 
+	if (!ud || !ud->tpd) {
+		triton_log_error("triton: context_unregister: context is not registered");
+		return;
+	}
+
+	ctx = (struct _triton_context_t *)ud->tpd;
 	log_debug2("ctx %p: unregister\n", ctx);
 
 	while (!list_empty(&ctx->pending_calls)) {
@@ -406,29 +425,23 @@ void __export triton_context_unregister(struct triton_context_t *ud)
 	}
 
 	if (!list_empty(&ctx->handlers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: handlers is not empty");
-		{
-			struct _triton_md_handler_t *h;
-			list_for_each_entry(h, &ctx->handlers, entry)
-				if (h->ud)
-					printf("%p\n", h->ud);
-		}
-		abort();
+		triton_log_error("BUG:ctx:triton_unregister_ctx: handlers is not empty; keeping context to avoid service abort");
+		return;
 	}
 
 	if (!list_empty(&ctx->pending_handlers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_handlers is not empty");
-		abort();
+		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_handlers is not empty; keeping context to avoid service abort");
+		return;
 	}
 
 	if (!list_empty(&ctx->timers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: timers is not empty");
-		abort();
+		triton_log_error("BUG:ctx:triton_unregister_ctx: timers is not empty; keeping context to avoid service abort");
+		return;
 	}
 
 	if (!list_empty(&ctx->pending_timers)) {
-		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_timers is not empty");
-		abort();
+		triton_log_error("BUG:ctx:triton_unregister_ctx: pending_timers is not empty; keeping context to avoid service abort");
+		return;
 	}
 
 	ctx->need_free = 1;
@@ -452,7 +465,14 @@ void __export triton_context_unregister(struct triton_context_t *ud)
 
 void __export triton_context_set_priority(struct triton_context_t *ud, int prio)
 {
-	struct _triton_context_t *ctx = (struct _triton_context_t *)ud->tpd;
+	struct _triton_context_t *ctx;
+
+	if (!ud || !ud->tpd) {
+		triton_log_error("triton: context_set_priority: context is not registered");
+		return;
+	}
+
+	ctx = (struct _triton_context_t *)ud->tpd;
 
 	if (prio < 0 || prio >= CTX_PRIO_MAX) {
 		triton_log_error("triton: invalid context priority %i, ignoring", prio);
@@ -482,6 +502,10 @@ static ucontext_t * __attribute__((noinline)) alloc_context()
 	size_t stack_size = thread_frame - frame;
 
 	uc = _malloc(sizeof(*uc) + stack_size);
+	if (!uc) {
+		triton_log_error("triton: alloc_context: out of memory");
+		return NULL;
+	}
 	uc->uc_stack.ss_sp = (void *)(uc + 1);
 	uc->uc_stack.ss_size = stack_size;
 	memcpy(uc->uc_stack.ss_sp, frame, stack_size);
@@ -491,12 +515,27 @@ static ucontext_t * __attribute__((noinline)) alloc_context()
 
 void __export triton_context_schedule()
 {
-	volatile struct _triton_context_t *ctx = (struct _triton_context_t *)this_ctx->tpd;
+	volatile struct _triton_context_t *ctx;
+
+	if (!this_ctx || !this_ctx->tpd) {
+		triton_log_error("triton: context_schedule: no current context");
+		return;
+	}
+
+	ctx = (struct _triton_context_t *)this_ctx->tpd;
+	if (!ctx->thread) {
+		triton_log_error("triton: context_schedule: context has no worker thread");
+		return;
+	}
 
 	log_debug2("ctx %p: enter schedule\n", ctx);
 	__sync_add_and_fetch(&triton_stat.context_sleeping, 1);
 
 	ctx->uc = alloc_context();
+	if (!ctx->uc) {
+		__sync_sub_and_fetch(&triton_stat.context_sleeping, 1);
+		return;
+	}
 
 	getcontext(ctx->uc);
 
@@ -523,9 +562,15 @@ void __export triton_context_schedule()
 
 void __export triton_context_wakeup(struct triton_context_t *ud)
 {
-	struct _triton_context_t *ctx = (struct _triton_context_t *)ud->tpd;
+	struct _triton_context_t *ctx;
 	int r = 0;
 
+	if (!ud || !ud->tpd) {
+		triton_log_error("triton: context_wakeup: context is not registered");
+		return;
+	}
+
+	ctx = (struct _triton_context_t *)ud->tpd;
 	log_debug2("ctx %p: wakeup\n", ctx);
 
 	if (ctx->init) {
@@ -544,11 +589,25 @@ void __export triton_context_wakeup(struct triton_context_t *ud)
 		 * way, when triton_context_schedule() will run, it will
 		 * realise that triton_context_wakeup() was already executed
 		 * and will avoid putting 'ctx' in sleep mode.
+		 *
+		 * Production hardening: do not enqueue the same sleeping context
+		 * more than once. Several independent events can wake the same
+		 * context before the worker resumes it (for example
+		 * single-session=replace can wait on old sessions that finish
+		 * close together). Re-adding the same entry2 list node corrupts
+		 * the Triton wakeup/context queues and can later crash in
+		 * list_del() with entry->prev == NULL.
 		 */
-		ctx->wakeup = 1;
-		if (ctx->asleep) {
-			list_add_tail(&ctx->entry2, &ctx->thread->wakeup_list[ctx->priority]);
-			r = ctx->thread->ctx == NULL;
+		if (!ctx->wakeup) {
+			ctx->wakeup = 1;
+			if (ctx->asleep) {
+				if (!ctx->thread) {
+					triton_log_error("triton: context_wakeup: asleep context has no thread");
+				} else {
+					list_add_tail(&ctx->entry2, &ctx->thread->wakeup_list[ctx->priority]);
+					r = ctx->thread->ctx == NULL;
+				}
+			}
 		}
 		spin_unlock(&threads_lock);
 	}
@@ -560,9 +619,20 @@ void __export triton_context_wakeup(struct triton_context_t *ud)
 int __export triton_context_call(struct triton_context_t *ud, void (*func)(void *), void *arg)
 {
 	struct _triton_context_t *ctx = ud ? (struct _triton_context_t *)ud->tpd : (struct _triton_context_t *)default_ctx.tpd;
-	struct _triton_ctx_call_t *call = mempool_alloc(call_pool);
+	struct _triton_ctx_call_t *call;
 	int r;
 
+	if (!func) {
+		triton_log_error("triton: context_call: NULL function");
+		return -1;
+	}
+
+	if (!ctx) {
+		triton_log_error("triton: context_call: context is not registered");
+		return -1;
+	}
+
+	call = mempool_alloc(call_pool);
 	if (!call)
 		return -1;
 
@@ -584,6 +654,11 @@ void __export triton_cancel_call(struct triton_context_t *ud, void (*func)(void 
 {
 	struct _triton_context_t *ctx = ud ? (struct _triton_context_t *)ud->tpd : (struct _triton_context_t *)default_ctx.tpd;
 	struct list_head *pos, *n;
+
+	if (!ctx) {
+		triton_log_error("triton: cancel_call: context is not registered");
+		return;
+	}
 	struct _triton_ctx_call_t *call;
 	LIST_HEAD(rem_calls);
 
@@ -645,9 +720,19 @@ static void ru_update(struct triton_timer_t *t)
 
 void __export triton_register_init(int order, void (*func)(void))
 {
-	struct _triton_init_t *i1, *i = _malloc(sizeof(*i));
+	struct _triton_init_t *i1, *i;
 	struct list_head *p = init_list.next;
 
+	if (!func) {
+		triton_log_error("triton: register_init: NULL function");
+		return;
+	}
+
+	i = _malloc(sizeof(*i));
+	if (!i) {
+		triton_log_error("triton: register_init: out of memory");
+		return;
+	}
 
 	i->order = order;
 	i->func = func;
@@ -670,6 +755,10 @@ int __export triton_init(const char *conf_file)
 
 	ctx_pool = mempool_create(sizeof(struct _triton_context_t));
 	call_pool = mempool_create(sizeof(struct _triton_ctx_call_t));
+	if (!ctx_pool || !call_pool) {
+		triton_log_error("triton:init: mempool_create failed");
+		return -1;
+	}
 
 	for (i = 0; i < CTX_PRIO_MAX; i++)
 		INIT_LIST_HEAD(&ctx_queue[i]);
@@ -703,7 +792,10 @@ int __export triton_load_modules(const char *mod_sect)
 
 	while (!list_empty(&init_list)) {
 		i = list_entry(init_list.next, typeof(*i), entry);
-		i->func();
+		if (i->func)
+			i->func();
+		else
+			triton_log_error("triton:load_modules: NULL init function");
 		list_del(&i->entry);
 		_free(i);
 	}

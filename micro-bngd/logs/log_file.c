@@ -200,20 +200,27 @@ static void *log_thread(void *unused)
 
 			spin_lock(&lf->lock);
 			if (list_empty(&lf->msgs)) {
+				int need_free = lf->need_free;
+				int fd = lf->fd;
+				int new_fd = lf->new_fd;
+
+				lf->queued = 0;
+				spin_unlock(&lf->lock);
+
+				/* Do not hold the per-log spinlock while doing disk I/O or
+				 * freeing log messages. Under heavy churn, worker threads can
+				 * otherwise spin in queue_log() behind the log writer. */
 				if (iov_cnt) {
-					writev(lf->fd, iov, iov_cnt);
+					writev(fd, iov, iov_cnt);
 					purge(&free_list);
 				}
 
-				lf->queued = 0;
-				if (lf->need_free) {
-					spin_unlock(&lf->lock);
-					close(lf->fd);
-					if (lf->new_fd != -1)
-						close(lf->new_fd);
+				if (need_free) {
+					close(fd);
+					if (new_fd != -1)
+						close(new_fd);
 					mempool_free(lf->lpd);
-				} else
-					spin_unlock(&lf->lock);
+				}
 
 				break;
 			}

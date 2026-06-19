@@ -186,6 +186,13 @@ static void disconnect(struct pppoe_conn_t *conn)
 {
 	struct pppoe_serv_t *serv = conn->serv;
 
+	/* PADR increments ap_session_stat.incoming before PPP establishment.
+	 * If establishment fails before ap_session_starting() links the session,
+	 * release that incoming slot so a churn/FD guard rejection cannot deadlock
+	 * max-starting enforcement. */
+	if (conn->ppp.ses.state == 0 && ap_session_stat.incoming > 0)
+		__sync_sub_and_fetch(&ap_session_stat.incoming, 1);
+
   uint8_t *keyCookie;
   keyCookie = conn->cookie;
   obj_hashtable_ts_free(&serv->cookie_2_conn, keyCookie, COOKIE_LENGTH - 4);
@@ -1317,7 +1324,7 @@ static void pppoe_recv_PADR(struct pppoe_serv_t *serv, uint8_t *pack, int size)
 	struct pppoe_tag *service_name_tag = NULL;
 	struct pppoe_tag *tr101_tag = NULL;
 	int n, service_match = 0;
-	struct pppoe_conn_t *conn;
+	struct pppoe_conn_t *conn = NULL;
 	int vendor_id;
 	uint16_t ppp_max_payload = 0;
 	struct pppoe_interface_config_t *interface_conf = NULL;
@@ -1512,9 +1519,11 @@ padr_tags_done:
   //log_error(" ##### starting: %u, incoming: %u\n", ap_session_stat.starting, ap_session_stat.incoming);
 
 	conn = allocate_channel(serv, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag, tr101_tag, (uint8_t *)ac_cookie_tag->tag_data, ppp_max_payload);
-	if (!conn)
+	if (!conn) {
+		if (ap_session_stat.incoming > 0)
+			__sync_sub_and_fetch(&ap_session_stat.incoming, 1);
 		pppoe_send_err(serv, ethhdr->h_source, host_uniq_tag, relay_sid_tag, CODE_PADS, TAG_AC_SYSTEM_ERROR);
-	else {
+	} else {
 		pppoe_send_PADS(conn);
 		triton_context_call(&conn->ctx, (triton_event_func)connect_channel, conn);
 		triton_context_wakeup(&conn->ctx);
